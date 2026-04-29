@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -16,19 +16,43 @@ const AGENTS = [
   { id: "ffd", label: "FFD" },
 ];
 
+// Module-level cache: persists while the SPA is mounted (i.e. while you
+// navigate between tabs) but is wiped on full page reload, since the JS
+// module is re-evaluated. This is the behavior the user asked for.
+const FORM_DEFAULTS = {
+  agent: "dqn",
+  nServers: 10,
+  episodes: 200,
+  epLen: 500,
+  alpha: 1.0,
+  beta: 50.0,
+  seed: 0,
+  evalEps: 10,
+  useTraces: false,
+};
+const formCache = { ...FORM_DEFAULTS };
+
 export default function TrainPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
 
-  const [agent, setAgent] = useState("dqn");
-  const [nServers, setNServers] = useState(10);
-  const [episodes, setEpisodes] = useState(200);
-  const [epLen, setEpLen] = useState(500);
-  const [alpha, setAlpha] = useState(1.0);
-  const [beta, setBeta] = useState(50.0);
-  const [seed, setSeed] = useState(0);
-  const [evalEps, setEvalEps] = useState(10);
-  const [useTraces, setUseTraces] = useState(false);
+  const [agent, setAgent] = useState(() => formCache.agent);
+  const [nServers, setNServers] = useState(() => formCache.nServers);
+  const [episodes, setEpisodes] = useState(() => formCache.episodes);
+  const [epLen, setEpLen] = useState(() => formCache.epLen);
+  const [alpha, setAlpha] = useState(() => formCache.alpha);
+  const [beta, setBeta] = useState(() => formCache.beta);
+  const [seed, setSeed] = useState(() => formCache.seed);
+  const [evalEps, setEvalEps] = useState(() => formCache.evalEps);
+  const [useTraces, setUseTraces] = useState(() => formCache.useTraces);
+
+  // Mirror every state change back to the module-level cache so the next
+  // mount of TrainPage (after a tab switch) reads the up-to-date values.
+  useEffect(() => {
+    Object.assign(formCache, {
+      agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces,
+    });
+  }, [agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces]);
 
   const { data: experiments = [] } = useQuery({
     queryKey: ["experiments"],
