@@ -13,17 +13,15 @@ def _optimal_reward(cfg: dict) -> float | None:
     """Theoretical reward ceiling for one episode under this run's config.
 
     Achieved by an oracle that incurs zero SLA violations and consumes only
-    the idle-power baseline (no active work, no invalid actions). This is
-    a strict upper bound — real workloads always add some active power on
-    top — but it's the cleanest single number to compare runs against.
+    the idle-power baseline (no active work, no invalid actions).
 
         R_max = -α · (P_IDLE / P_MAX) · episode_length
     """
     try:
         alpha = float(cfg["alpha"])
-        ep_len = int(cfg["episode_length"])
         p_idle = float(cfg["p_idle"])
         p_max = float(cfg["p_max"])
+        ep_len = int(cfg["episode_length"])
     except (KeyError, TypeError, ValueError):
         return None
     if p_max <= 0:

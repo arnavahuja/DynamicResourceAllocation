@@ -107,7 +107,6 @@ class CloudClusterEnv(gym.Env):
                 self.job_queue.popleft()
                 server.assign(job)
             else:
-                # Invalid assignment: job stays in queue, penalty applied
                 reward += self.invalid_action_penalty
 
         # --- Advance simulation by one timestep ---
@@ -152,9 +151,12 @@ class CloudClusterEnv(gym.Env):
         max_possible_power = self.p_max * self.num_servers
         normalized_power = cluster_power / max_possible_power
 
+        # SLA term divided by N_SERVERS so its magnitude is comparable to
+        # normalized_power (which lies in [0,1]). Without this scaling, the
+        # SLA term dominates DQN's Bellman targets and PPO's value loss.
         reward += -(
             self.reward_alpha * normalized_power
-            + self.reward_beta * sla_violations_this_step
+            + self.reward_beta * sla_violations_this_step / max(1, self.num_servers)
         )
 
         # --- Check termination ---

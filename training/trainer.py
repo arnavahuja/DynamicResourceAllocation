@@ -74,9 +74,11 @@ class Trainer:
             losses: list[float] = []
             last_eps: float | None = None
             steps = 0
+            action_hist = np.zeros(self.env.num_servers, dtype=np.int64)
 
             while True:
                 action = self.agent.select_action(obs, mask, greedy=False)
+                action_hist[action] += 1
                 next_obs, reward, terminated, truncated, info = self.env.step(action)
                 next_mask = compute_action_mask(self.env)
                 done = terminated or truncated
@@ -129,10 +131,11 @@ class Trainer:
             if (ep + 1) % self.log_every == 0 or ep == 0:
                 eps_str = f" eps={last_eps:.3f}" if last_eps is not None else ""
                 loss_str = f" loss={stats.loss_mean:.4f}" if stats.loss_mean else ""
+                hist_str = " act=[" + ",".join(str(c) for c in action_hist) + "]"
                 print(
                     f"[{self.run_name}] ep {ep+1:5d}/{episodes} "
                     f"R={ep_reward:9.2f} power={ep_power:8.0f} "
-                    f"sla={ep_sla:4d} steps={steps:4d}{eps_str}{loss_str}"
+                    f"sla={ep_sla:4d} steps={steps:4d}{eps_str}{loss_str}{hist_str}"
                 )
 
             if self.wandb is not None:

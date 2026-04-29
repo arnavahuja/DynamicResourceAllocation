@@ -43,13 +43,23 @@ export default function MetricBars({
         <YAxis
           tick={{ fontSize: 11, fontFamily: "IBM Plex Mono" }}
           tickFormatter={formatY}
+          domain={["auto", "auto"]}
           label={{ value: yLabel, angle: -90, position: "insideLeft", style: { fontSize: 11, fill: "#6b7280" } }}
         />
         <Tooltip
           contentStyle={{ fontFamily: "IBM Plex Mono", fontSize: 12 }}
           formatter={(v) => formatY(v)}
         />
-        <Bar dataKey={metric}>
+        <Bar
+          dataKey={metric}
+          label={{
+            position: "top",
+            fontSize: 10,
+            fontFamily: "IBM Plex Mono",
+            fill: "#0a1628",
+            formatter: (v) => (v == null ? "" : formatY(v)),
+          }}
+        >
           {data.map((row, i) => (
             <Cell key={i} fill={colorForAgent(row[agentKey])} />
           ))}

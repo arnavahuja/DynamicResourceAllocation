@@ -15,11 +15,11 @@ class SyntheticWorkloadGenerator(WorkloadGenerator):
 
     def __init__(
         self,
-        arrival_rate: float = 0.6,
+        arrival_rate: float = 0.8,
         cpu_range: tuple[float, float] = (0.05, 0.3),
         mem_range: tuple[float, float] = (0.05, 0.3),
-        duration_range: tuple[int, int] = (2, 8),
-        sla_multiplier: float = 2.0,
+        duration_range: tuple[int, int] = (2, 10),
+        sla_multiplier: float = 1.6,
         max_jobs: int = 5000,
         seed: int | None = None,
     ):
