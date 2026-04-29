@@ -142,6 +142,8 @@ export default function TrainPage() {
                 <th>Servers</th>
                 <th>Episodes</th>
                 <th>Last-10 R</th>
+                <th>Optimal R</th>
+                <th>Gap %</th>
                 <th>SLA rate</th>
                 <th></th>
               </tr>
@@ -155,6 +157,8 @@ export default function TrainPage() {
                   <td className="mono">{e.n_servers}</td>
                   <td className="mono">{e.episodes}</td>
                   <td className="mono">{fmt(e.mean_reward_last10)}</td>
+                  <td className="mono">{fmt(e.optimal_reward)}</td>
+                  <td className="mono">{e.gap_pct != null ? e.gap_pct.toFixed(1) + "%" : "—"}</td>
                   <td className="mono">{e.sla_violation_rate != null ? (e.sla_violation_rate * 100).toFixed(1) + "%" : "—"}</td>
                   <td onClick={(ev) => ev.stopPropagation()}>
                     {e.status === "running" && (

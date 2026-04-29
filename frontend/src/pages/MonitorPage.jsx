@@ -8,6 +8,7 @@ import Badge from "../components/UI/Badge.jsx";
 import RewardCurve from "../components/Charts/RewardCurve.jsx";
 import PowerSlaScatter from "../components/Charts/PowerSlaScatter.jsx";
 import ServerHeatmap from "../components/Charts/ServerHeatmap.jsx";
+import MetricLine, { rollingMean } from "../components/Charts/MetricLine.jsx";
 
 export default function MonitorPage() {
   const [params, setParams] = useSearchParams();
@@ -62,8 +63,30 @@ export default function MonitorPage() {
     };
   }, [runId]);
 
-  const rewardSeries = useMemo(
-    () => [{ name: "reward", data: episodes.map((e) => ({ episode: e.episode, reward: e.reward })) }],
+  const rewardSeries = useMemo(() => {
+    const raw = episodes.map((e) => e.reward);
+    const smoothed = rollingMean(raw, 20);
+    return [
+      { name: "reward", data: episodes.map((e) => ({ episode: e.episode, reward: e.reward })) },
+      {
+        name: "rolling-20",
+        color: "#F59E0B",
+        data: episodes.map((e, i) => ({ episode: e.episode, "rolling-20": smoothed[i] })),
+      },
+    ];
+  }, [episodes]);
+
+  const powerSeries = useMemo(
+    () => [
+      { name: "power", color: "#EF4444", data: episodes.map((e) => ({ episode: e.episode, power: e.power })) },
+    ],
+    [episodes]
+  );
+
+  const slaSeries = useMemo(
+    () => [
+      { name: "sla", color: "#8B5CF6", data: episodes.map((e) => ({ episode: e.episode, sla: e.sla_violations })) },
+    ],
     [episodes]
   );
 
@@ -77,6 +100,7 @@ export default function MonitorPage() {
   // experiment config.
   const exp = experiments.find((x) => x.run_id === runId);
   const nServers = exp?.n_servers ?? 10;
+  const optimalReward = exp?.optimal_reward ?? null;
   const placeholderUtils = useMemo(() => {
     const last = episodes[episodes.length - 1];
     if (!last) return new Array(nServers).fill(0);
@@ -117,7 +141,11 @@ export default function MonitorPage() {
         ) : (
           <div className="grid cols-3">
             <Stat label="episode" value={status ? `${status.current_episode}/${status.total_episodes}` : "—"} />
-            <Stat label="last reward" value={status?.last_reward != null ? status.last_reward.toFixed(2) : "—"} />
+            <Stat
+              label="last reward"
+              value={status?.last_reward != null ? status.last_reward.toFixed(2) : "—"}
+              hint={optimalReward != null ? `optimal ${optimalReward.toFixed(2)}` : undefined}
+            />
             <Stat label="ETA" value={status?.eta_seconds ? `${Math.round(status.eta_seconds)}s` : "—"} />
           </div>
         )}
@@ -125,15 +153,31 @@ export default function MonitorPage() {
 
       {runId && (
         <>
-          <Card title="Reward (per episode)">
-            <RewardCurve series={rewardSeries} />
+          <Card
+            title="Reward (per episode)"
+            sub={
+              optimalReward != null
+                ? `Theoretical ceiling under this run's α/P_idle/P_max/episode_length: ${optimalReward.toFixed(2)} (zero SLA violations + idle-only power)`
+                : undefined
+            }
+          >
+            <RewardCurve series={rewardSeries} optimalReward={optimalReward} />
           </Card>
 
           <div className="grid cols-2">
-            <Card title="Power vs. SLA">
+            <Card title="Power per episode" sub="Total cluster power consumption (W·timesteps) per episode">
+              <MetricLine series={powerSeries} yLabel="Power (W·steps)" yKey="power" />
+            </Card>
+            <Card title="SLA violations per episode" sub="Cumulative breaches at episode end">
+              <MetricLine series={slaSeries} yLabel="Violations" yKey="sla" />
+            </Card>
+          </div>
+
+          <div className="grid cols-2">
+            <Card title="Power vs. SLA" sub="Each point = one training episode">
               <PowerSlaScatter groups={scatter} />
             </Card>
-            <Card title={`Server utilization (N=${nServers})`} sub="Last episode snapshot">
+            <Card title={`Server utilization (N=${nServers})`} sub="Last episode snapshot (placeholder gradient — per-server data not yet streamed)">
               <ServerHeatmap utilizations={placeholderUtils} />
             </Card>
           </div>
@@ -151,11 +195,12 @@ export default function MonitorPage() {
   );
 }
 
-function Stat({ label, value }) {
+function Stat({ label, value, hint }) {
   return (
     <div className="stat">
       <div className="label">{label}</div>
       <div className="value">{value}</div>
+      {hint && <div className="label" style={{ textTransform: "none", letterSpacing: 0 }}>{hint}</div>}
     </div>
   );
 }

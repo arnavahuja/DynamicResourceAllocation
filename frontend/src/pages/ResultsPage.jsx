@@ -8,6 +8,8 @@ import Button from "../components/UI/Button.jsx";
 import Badge from "../components/UI/Badge.jsx";
 import RewardCurve from "../components/Charts/RewardCurve.jsx";
 import PowerSlaScatter from "../components/Charts/PowerSlaScatter.jsx";
+import MetricLine from "../components/Charts/MetricLine.jsx";
+import MetricBars from "../components/Charts/MetricBars.jsx";
 
 export default function ResultsPage() {
   const [params] = useSearchParams();
@@ -53,6 +55,24 @@ export default function ResultsPage() {
     [details]
   );
 
+  const powerSeries = useMemo(
+    () =>
+      details.map((d) => ({
+        name: `${d.summary.agent} · ${d.summary.run_id.slice(-8)}`,
+        data: (d.episodes || []).map((e) => ({ episode: e.episode, value: e.power })),
+      })),
+    [details]
+  );
+
+  const slaSeries = useMemo(
+    () =>
+      details.map((d) => ({
+        name: `${d.summary.agent} · ${d.summary.run_id.slice(-8)}`,
+        data: (d.episodes || []).map((e) => ({ episode: e.episode, value: e.sla_violations })),
+      })),
+    [details]
+  );
+
   function downloadCsv() {
     const rows = [["run_id", "agent", "episode", "reward", "power", "sla_violations", "steps"]];
     details.forEach((d) =>
@@ -93,6 +113,8 @@ export default function ResultsPage() {
                 <th>Servers</th>
                 <th>Episodes</th>
                 <th>Last-10 R</th>
+                <th>Optimal R</th>
+                <th>Gap %</th>
                 <th>Mean Power</th>
                 <th>SLA rate</th>
               </tr>
@@ -109,6 +131,8 @@ export default function ResultsPage() {
                   <td className="mono">{e.n_servers}</td>
                   <td className="mono">{e.episodes}</td>
                   <td className="mono">{fmt(e.mean_reward_last10)}</td>
+                  <td className="mono">{fmt(e.optimal_reward)}</td>
+                  <td className="mono">{e.gap_pct != null ? e.gap_pct.toFixed(1) + "%" : "—"}</td>
                   <td className="mono">{fmt(e.mean_power, 0)}</td>
                   <td className="mono">{e.sla_violation_rate != null ? (e.sla_violation_rate * 100).toFixed(1) + "%" : "—"}</td>
                 </tr>
@@ -120,7 +144,7 @@ export default function ResultsPage() {
 
       {details.length > 0 && (
         <>
-          <Card title="Comparison Table" sub="Eval-time metrics from the selected runs">
+          <Card title="Comparison Table" sub="Eval-time metrics. 'Optimal' is the theoretical reward ceiling for the run's α/P_idle/P_max/episode_length (zero SLA + idle-only power).">
             <table>
               <thead>
                 <tr>
@@ -128,6 +152,8 @@ export default function ResultsPage() {
                   <th>Agent</th>
                   <th>mean R (eval)</th>
                   <th>std R</th>
+                  <th>optimal R</th>
+                  <th>gap %</th>
                   <th>mean power</th>
                   <th>SLA rate</th>
                   <th>jobs/ep</th>
@@ -136,12 +162,19 @@ export default function ResultsPage() {
               <tbody>
                 {details.map((d) => {
                   const ev = d.eval || {};
+                  const opt = d.optimal_reward;
+                  const gap =
+                    opt != null && ev.mean_reward != null && opt !== 0
+                      ? ((opt - ev.mean_reward) / Math.abs(opt)) * 100
+                      : null;
                   return (
                     <tr key={d.summary.run_id}>
                       <td className="mono" style={{ fontSize: 11 }}>{d.summary.run_id}</td>
                       <td>{d.summary.agent}</td>
                       <td className="mono">{fmt(ev.mean_reward)}</td>
                       <td className="mono">{fmt(ev.std_reward)}</td>
+                      <td className="mono">{fmt(opt)}</td>
+                      <td className="mono">{gap != null ? gap.toFixed(1) + "%" : "—"}</td>
                       <td className="mono">{fmt(ev.mean_power, 0)}</td>
                       <td className="mono">{ev.sla_violation_rate != null ? (ev.sla_violation_rate * 100).toFixed(2) + "%" : "—"}</td>
                       <td className="mono">{fmt(ev.mean_jobs_completed, 1)}</td>
@@ -152,9 +185,32 @@ export default function ResultsPage() {
             </table>
           </Card>
 
-          <Card title="Training Curves">
-            <RewardCurve series={rewardSeries} height={320} />
+          <Card title="Training Curves" sub={(() => {
+              const opts = details.map((d) => d.optimal_reward).filter((v) => v != null);
+              if (!opts.length) return undefined;
+              const allEqual = opts.every((v) => Math.abs(v - opts[0]) < 1e-6);
+              return allEqual
+                ? `Dashed line = optimal reward ceiling (${opts[0].toFixed(2)})`
+                : `Dashed line = optimal of best-case run (${Math.max(...opts).toFixed(2)}); selected runs have differing α/episode_length so other ceilings differ.`;
+            })()}>
+            <RewardCurve
+              series={rewardSeries}
+              height={320}
+              optimalReward={(() => {
+                const opts = details.map((d) => d.optimal_reward).filter((v) => v != null);
+                return opts.length ? Math.max(...opts) : null;
+              })()}
+            />
           </Card>
+
+          <div className="grid cols-2">
+            <Card title="Power per episode" sub="One line per selected run">
+              <MetricLine series={powerSeries} yLabel="Power (W·steps)" />
+            </Card>
+            <Card title="SLA violations per episode" sub="One line per selected run">
+              <MetricLine series={slaSeries} yLabel="Violations" />
+            </Card>
+          </div>
 
           <Card title="Power vs. SLA (per episode)" sub="Each point = one training episode">
             <PowerSlaScatter groups={paretoGroups} height={320} />

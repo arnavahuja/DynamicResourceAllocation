@@ -5,11 +5,13 @@ import TopBar from "./components/Layout/TopBar.jsx";
 import TrainPage from "./pages/TrainPage.jsx";
 import MonitorPage from "./pages/MonitorPage.jsx";
 import ResultsPage from "./pages/ResultsPage.jsx";
+import ComparePage from "./pages/ComparePage.jsx";
 
 const TITLES = {
   "/": "Train",
   "/monitor": "Live Monitor",
   "/results": "Results",
+  "/compare": "Compare Runs",
 };
 
 export default function App() {
@@ -25,6 +27,7 @@ export default function App() {
             <Route path="/" element={<TrainPage />} />
             <Route path="/monitor" element={<MonitorPage />} />
             <Route path="/results" element={<ResultsPage />} />
+            <Route path="/compare" element={<ComparePage />} />
           </Routes>
         </div>
       </div>

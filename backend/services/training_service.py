@@ -31,6 +31,7 @@ from backend.core.websocket_manager import bus
 from backend.models import db
 from backend.services import gcp_service
 from backend.models.schemas import TrainRequest
+from environment import config as env_config
 from environment.cluster_env import CloudClusterEnv
 from environment.workload.synthetic import SyntheticWorkloadGenerator
 from training.evaluator import evaluate
@@ -93,12 +94,22 @@ def start_training(req: TrainRequest) -> str:
     run_id = _new_run_id(req.agent)
     created_at = datetime.now(timezone.utc).isoformat()
 
+    # Snapshot the env constants that contribute to the optimal-reward
+    # ceiling so it can be recomputed reproducibly later, even if .env
+    # changes between runs.
+    config_dump = {
+        **req.model_dump(),
+        "p_idle": env_config.P_IDLE,
+        "p_max": env_config.P_MAX,
+        "invalid_action_penalty": env_config.INVALID_ACTION_PENALTY,
+    }
+
     db.insert_experiment(
         run_id=run_id,
         agent=req.agent,
         status="pending",
         created_at=created_at,
-        config=req.model_dump(),
+        config=config_dump,
     )
 
     with _jobs_lock:

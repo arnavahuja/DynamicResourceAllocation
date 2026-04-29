@@ -1,19 +1,22 @@
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, Legend,
+  LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, Legend, ReferenceLine,
 } from "recharts";
 
 const COLORS = ["#1E3A8A", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4"];
 
-export default function RewardCurve({ series, height = 280, yLabel = "Reward" }) {
+export default function RewardCurve({ series, height = 280, yLabel = "Reward", optimalReward = null }) {
   // series = [{ name, data: [{episode, reward}, ...] }]
   if (!series || series.length === 0) return <div className="empty">No episodes yet</div>;
 
-  // Merge into wide format keyed by episode for recharts.
+  // Merge into wide format keyed by episode for recharts. Each series's
+  // data point may store its value under either `reward` (legacy) or under
+  // a key matching the series name — accept both.
   const all = new Map();
   series.forEach((s) => {
     s.data.forEach((p) => {
       if (!all.has(p.episode)) all.set(p.episode, { episode: p.episode });
-      all.get(p.episode)[s.name] = p.reward;
+      const v = p[s.name] !== undefined ? p[s.name] : p.reward;
+      all.get(p.episode)[s.name] = v;
     });
   });
   const data = [...all.values()].sort((a, b) => a.episode - b.episode);
@@ -31,12 +34,28 @@ export default function RewardCurve({ series, height = 280, yLabel = "Reward" })
             key={s.name}
             type="monotone"
             dataKey={s.name}
-            stroke={COLORS[i % COLORS.length]}
+            stroke={s.color || COLORS[i % COLORS.length]}
+            strokeDasharray={s.dash ? "4 4" : undefined}
             dot={false}
             strokeWidth={2}
             isAnimationActive={false}
           />
         ))}
+        {optimalReward != null && (
+          <ReferenceLine
+            y={optimalReward}
+            stroke="#10B981"
+            strokeDasharray="6 4"
+            strokeWidth={2}
+            label={{
+              value: `optimal ${optimalReward.toFixed(1)}`,
+              position: "insideTopRight",
+              fill: "#065f46",
+              fontSize: 11,
+              fontFamily: "IBM Plex Mono",
+            }}
+          />
+        )}
       </LineChart>
     </ResponsiveContainer>
   );
