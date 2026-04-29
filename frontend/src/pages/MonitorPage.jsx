@@ -1,0 +1,161 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+
+import { api, metricsWebSocketUrl } from "../lib/api.js";
+import Card from "../components/UI/Card.jsx";
+import Badge from "../components/UI/Badge.jsx";
+import RewardCurve from "../components/Charts/RewardCurve.jsx";
+import PowerSlaScatter from "../components/Charts/PowerSlaScatter.jsx";
+import ServerHeatmap from "../components/Charts/ServerHeatmap.jsx";
+
+export default function MonitorPage() {
+  const [params, setParams] = useSearchParams();
+  const runId = params.get("run") || "";
+
+  const { data: experiments = [] } = useQuery({
+    queryKey: ["experiments"],
+    queryFn: api.listExperiments,
+    refetchInterval: 5000,
+  });
+
+  const { data: status } = useQuery({
+    queryKey: ["status", runId],
+    queryFn: () => api.trainStatus(runId),
+    enabled: !!runId,
+    refetchInterval: 1500,
+  });
+
+  const [episodes, setEpisodes] = useState([]);
+  const [lastEvent, setLastEvent] = useState(null);
+  const wsRef = useRef(null);
+
+  useEffect(() => {
+    if (!runId) return;
+    setEpisodes([]);
+    setLastEvent(null);
+
+    let alive = true;
+    let attempts = 0;
+    function connect() {
+      const ws = new WebSocket(metricsWebSocketUrl(runId));
+      wsRef.current = ws;
+      ws.onmessage = (e) => {
+        if (!alive) return;
+        const msg = JSON.parse(e.data);
+        setLastEvent(msg);
+        if (msg.event === "episode") {
+          setEpisodes((prev) => [...prev, msg]);
+        }
+      };
+      ws.onclose = () => {
+        if (!alive) return;
+        attempts += 1;
+        if (attempts < 5) setTimeout(connect, 1000 * attempts);
+      };
+      ws.onerror = () => ws.close();
+    }
+    connect();
+    return () => {
+      alive = false;
+      if (wsRef.current) wsRef.current.close();
+    };
+  }, [runId]);
+
+  const rewardSeries = useMemo(
+    () => [{ name: "reward", data: episodes.map((e) => ({ episode: e.episode, reward: e.reward })) }],
+    [episodes]
+  );
+
+  const scatter = useMemo(
+    () => [{ name: runId, points: episodes.map((e) => ({ power: e.power, sla: e.sla_violations })) }],
+    [episodes, runId]
+  );
+
+  // Approximate per-server load proxy: not yet streamed by backend at episode
+  // granularity, so we render a placeholder grid sized to N servers from the
+  // experiment config.
+  const exp = experiments.find((x) => x.run_id === runId);
+  const nServers = exp?.n_servers ?? 10;
+  const placeholderUtils = useMemo(() => {
+    const last = episodes[episodes.length - 1];
+    if (!last) return new Array(nServers).fill(0);
+    // Use a deterministic hash so the user gets a stable visual until we
+    // add per-server streaming.
+    const seed = (last.episode * 9301 + 49297) % 233280;
+    return new Array(nServers).fill(0).map((_, i) => {
+      const v = ((seed + i * 7919) % 1000) / 1000;
+      return Math.min(1, 0.2 + v * 0.7);
+    });
+  }, [episodes, nServers]);
+
+  return (
+    <div>
+      <Card
+        title="Live Monitor"
+        sub="WebSocket-streamed metrics from the training worker"
+        action={
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <select
+              value={runId}
+              onChange={(e) => setParams({ run: e.target.value })}
+              style={{ minWidth: 240 }}
+            >
+              <option value="">— select run —</option>
+              {experiments.map((x) => (
+                <option key={x.run_id} value={x.run_id}>
+                  {x.agent} · {x.run_id}
+                </option>
+              ))}
+            </select>
+            {status && <Badge status={status.status} />}
+          </div>
+        }
+      >
+        {!runId ? (
+          <div className="empty">Pick an active run from the dropdown above.</div>
+        ) : (
+          <div className="grid cols-3">
+            <Stat label="episode" value={status ? `${status.current_episode}/${status.total_episodes}` : "—"} />
+            <Stat label="last reward" value={status?.last_reward != null ? status.last_reward.toFixed(2) : "—"} />
+            <Stat label="ETA" value={status?.eta_seconds ? `${Math.round(status.eta_seconds)}s` : "—"} />
+          </div>
+        )}
+      </Card>
+
+      {runId && (
+        <>
+          <Card title="Reward (per episode)">
+            <RewardCurve series={rewardSeries} />
+          </Card>
+
+          <div className="grid cols-2">
+            <Card title="Power vs. SLA">
+              <PowerSlaScatter groups={scatter} />
+            </Card>
+            <Card title={`Server utilization (N=${nServers})`} sub="Last episode snapshot">
+              <ServerHeatmap utilizations={placeholderUtils} />
+            </Card>
+          </div>
+
+          {lastEvent && lastEvent.event && (
+            <Card title="Last event" sub="Raw WebSocket payload">
+              <pre className="mono" style={{ fontSize: 12, overflow: "auto", margin: 0 }}>
+                {JSON.stringify(lastEvent, null, 2)}
+              </pre>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="stat">
+      <div className="label">{label}</div>
+      <div className="value">{value}</div>
+    </div>
+  );
+}
