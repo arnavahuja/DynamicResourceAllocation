@@ -10,23 +10,15 @@ router = APIRouter(prefix="/experiments", tags=["experiments"])
 
 
 def _optimal_reward(cfg: dict) -> float | None:
-    """Theoretical reward ceiling for one episode under this run's config.
+    """Theoretical reward ceiling for one episode.
 
-    Achieved by an oracle that incurs zero SLA violations and consumes only
-    the idle-power baseline (no active work, no invalid actions).
-
-        R_max = -α · (P_IDLE / P_MAX) · episode_length
+    The reward formula now uses ACTIVE power (above idle), so an oracle
+    with zero load and zero SLA violations would score exactly 0.0.
+    This makes `gap_pct` directly interpretable: it's the cumulative
+    cost the agent's policy added on top of doing nothing, expressed
+    as a fraction of |best_real_score|.
     """
-    try:
-        alpha = float(cfg["alpha"])
-        p_idle = float(cfg["p_idle"])
-        p_max = float(cfg["p_max"])
-        ep_len = int(cfg["episode_length"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if p_max <= 0:
-        return None
-    return -alpha * (p_idle / p_max) * ep_len
+    return 0.0
 
 
 def _row_to_summary(row: dict) -> dict:
@@ -36,13 +28,16 @@ def _row_to_summary(row: dict) -> dict:
     optimal = _optimal_reward(cfg)
     last10 = summary.get("mean_reward_last10")
     gap_pct = None
-    if optimal is not None and last10 is not None and optimal != 0:
-        # How far above the ceiling the agent's reward sits, as % of |optimal|.
-        # 0% = at ceiling (perfect); 100% = twice as bad as ceiling.
-        gap_pct = (optimal - last10) / abs(optimal) * 100.0
+    # With active-power reward, optimal = 0, so |gap| = |last10|. Normalize
+    # by episode_length so the number is comparable across run lengths and
+    # has an intuitive scale (avg per-step cost).
+    ep_len = cfg.get("episode_length")
+    if last10 is not None and ep_len:
+        gap_pct = abs(last10) / ep_len * 100.0
     return {
         "run_id": row["run_id"],
         "agent": row["agent"],
+        "cluster_type": cfg.get("cluster_type", "homogeneous"),
         "status": row["status"],
         "created_at": row["created_at"],
         "n_servers": cfg.get("n_servers"),

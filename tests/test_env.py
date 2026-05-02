@@ -87,7 +87,7 @@ class TestCloudClusterEnv:
     def test_reset_obs_shape(self):
         env = CloudClusterEnv()
         obs, info = env.reset()
-        expected_dim = 2 * config.NUM_SERVERS + 4 * config.JOB_QUEUE_SIZE
+        expected_dim = 4 * config.NUM_SERVERS + 4 * config.JOB_QUEUE_SIZE
         assert obs.shape == (expected_dim,)
         assert obs.dtype == np.float32
 

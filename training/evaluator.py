@@ -40,8 +40,14 @@ def evaluate(
     env: CloudClusterEnv,
     n_episodes: int = 100,
     agent_name: str | None = None,
+    workload_seeds: list[int] | None = None,
 ) -> EvalResult:
-    """Run `n_episodes` greedy rollouts and return aggregate stats."""
+    """Run `n_episodes` greedy rollouts and return aggregate stats.
+
+    If `workload_seeds` is provided, episode i uses workload_seeds[i] (and
+    n_episodes is overridden by the list length). This is what enables the
+    held-out generalization test — pass test seeds the agent never trained on.
+    """
     rewards: list[float] = []
     powers: list[float] = []
     slas: list[int] = []
@@ -49,8 +55,14 @@ def evaluate(
     steps: list[int] = []
     utilizations: list[list[float]] = []
 
-    for _ in range(n_episodes):
-        obs, _ = env.reset()
+    if workload_seeds is not None:
+        n_episodes = len(workload_seeds)
+
+    for ep_idx in range(n_episodes):
+        if workload_seeds is not None:
+            obs, _ = env.reset(options={"workload_seed": int(workload_seeds[ep_idx])})
+        else:
+            obs, _ = env.reset()
         mask = compute_action_mask(env)
         ep_r = 0.0
         ep_p = 0.0

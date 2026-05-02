@@ -33,19 +33,26 @@ class BaseAgent(ABC):
 
 
 def compute_action_mask(env: CloudClusterEnv) -> np.ndarray:
-    """Return bool array of length N_SERVERS — True if the head-of-queue job
-    can be assigned to that server given current capacity."""
-    mask = np.zeros(env.num_servers, dtype=bool)
-    if len(env.job_queue) == 0:
-        # No job to place — every action is a no-op; mark all valid so
-        # the agent doesn't see a degenerate all-zero mask.
-        mask[:] = True
-        return mask
-    job = env.job_queue[0]
-    for i, server in enumerate(env.servers):
-        mask[i] = server.can_fit(job)
-    if not mask.any():
-        # No server can fit the job — return all-True so policy still picks
-        # something; the env will apply the invalid-action penalty.
-        mask[:] = True
+    """Return bool mask of shape (K * N + 1,) for the joint (job, server)
+    action space.
+
+    Layout: mask[k * N + n] = True if queue[k] exists AND server[n] can fit it.
+            mask[K * N]    = "wait" — only legal when no dispatch is possible
+                             (queue empty OR no fitting (job, server) pair).
+                             Without this restriction DQN converges to a wait-
+                             too-much local optimum, since waiting has zero
+                             immediate cost and queue-pressure penalty is
+                             heavily discounted.
+    """
+    N = env.num_servers
+    K = env.job_queue_size
+    mask = np.zeros(N * K + 1, dtype=bool)
+    for k in range(min(K, len(env.job_queue))):
+        job = env.job_queue[k]
+        for n, server in enumerate(env.servers):
+            if server.can_fit(job):
+                mask[k * N + n] = True
+    # Wait is only legal when no dispatch is.
+    if not mask[: N * K].any():
+        mask[N * K] = True
     return mask

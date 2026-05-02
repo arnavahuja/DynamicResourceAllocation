@@ -24,7 +24,7 @@ from environment.workload.synthetic import SyntheticWorkloadGenerator
 router = APIRouter(tags=["simulator"])
 
 
-def _build_agent(name: str, state_dim: int, n_actions: int):
+def _build_agent(name: str, state_dim: int, n_actions: int, n_servers: int, queue_size: int):
     name = name.lower()
     if name == "dqn":
         return DQNAgent(state_dim=state_dim, n_actions=n_actions)
@@ -33,11 +33,11 @@ def _build_agent(name: str, state_dim: int, n_actions: int):
     if name == "agentic":
         return SupervisorAgent(state_dim=state_dim, n_actions=n_actions)
     if name == "round_robin":
-        return RoundRobinAgent(n_actions=n_actions)
+        return RoundRobinAgent(n_servers=n_servers, queue_size=queue_size)
     if name == "sjf":
-        return ShortestJobFirstAgent(n_servers=n_actions)
+        return ShortestJobFirstAgent(n_servers=n_servers, queue_size=queue_size)
     if name == "ffd":
-        return FirstFitDecreasingAgent(n_servers=n_actions)
+        return FirstFitDecreasingAgent(n_servers=n_servers, queue_size=queue_size)
     raise ValueError(name)
 
 
@@ -54,7 +54,10 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
     state_dim = int(np.prod(env.observation_space.shape))
     n_actions = int(env.action_space.n)
     try:
-        agent = _build_agent(req.agent, state_dim, n_actions)
+        agent = _build_agent(
+            req.agent, state_dim, n_actions,
+            n_servers=env.num_servers, queue_size=env.job_queue_size,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"unknown agent: {e}")
 

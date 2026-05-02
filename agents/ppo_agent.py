@@ -191,16 +191,29 @@ class PPOAgent(BaseAgent):
         env: CloudClusterEnv,
         total_steps: int,
         on_episode_end: Callable | None = None,
+        train_seeds: list[int] | None = None,
     ) -> list[dict]:
         """PPO outer loop. Collects rollouts of `rollout_steps` and updates.
+
+        If `train_seeds` is given, every new episode samples uniformly from
+        that pool — same train/test seed protocol as DQN. Otherwise the env
+        uses whatever seed it was built with (legacy single-trajectory mode).
 
         Returns a list of per-episode summary dicts.
         """
         from training.trainer import EpisodeStats  # avoid circular import
 
         ep_stats: list[dict] = []
+        seed_rng = np.random.default_rng(0)
+
+        def _reset_env():
+            if train_seeds:
+                ws = int(seed_rng.choice(train_seeds))
+                return env.reset(options={"workload_seed": ws})
+            return env.reset()
+
         steps_done = 0
-        obs, _ = env.reset()
+        obs, _ = _reset_env()
         mask = compute_action_mask(env)
         ep_reward = 0.0
         ep_power = 0.0
@@ -245,7 +258,7 @@ class PPOAgent(BaseAgent):
                     if on_episode_end is not None:
                         on_episode_end(stats)
                     ep_idx += 1
-                    obs, _ = env.reset()
+                    obs, _ = _reset_env()
                     mask = compute_action_mask(env)
                     ep_reward = 0.0
                     ep_power = 0.0

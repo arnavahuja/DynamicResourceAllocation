@@ -29,6 +29,9 @@ const FORM_DEFAULTS = {
   seed: 0,
   evalEps: 10,
   useTraces: false,
+  clusterType: "homogeneous",
+  nTrainSeeds: 1,
+  nTestSeeds: 0,
 };
 const formCache = { ...FORM_DEFAULTS };
 
@@ -45,14 +48,18 @@ export default function TrainPage() {
   const [seed, setSeed] = useState(() => formCache.seed);
   const [evalEps, setEvalEps] = useState(() => formCache.evalEps);
   const [useTraces, setUseTraces] = useState(() => formCache.useTraces);
+  const [clusterType, setClusterType] = useState(() => formCache.clusterType);
+  const [nTrainSeeds, setNTrainSeeds] = useState(() => formCache.nTrainSeeds);
+  const [nTestSeeds, setNTestSeeds] = useState(() => formCache.nTestSeeds);
 
   // Mirror every state change back to the module-level cache so the next
   // mount of TrainPage (after a tab switch) reads the up-to-date values.
   useEffect(() => {
     Object.assign(formCache, {
-      agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces,
+      agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces, clusterType,
+      nTrainSeeds, nTestSeeds,
     });
-  }, [agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces]);
+  }, [agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces, clusterType, nTrainSeeds, nTestSeeds]);
 
   const { data: experiments = [] } = useQuery({
     queryKey: ["experiments"],
@@ -122,6 +129,58 @@ export default function TrainPage() {
           </div>
         </div>
 
+        <div style={{ marginTop: 16 }}>
+          <label>Cluster type</label>
+          <div className="seg">
+            <button
+              className={clusterType === "homogeneous" ? "active" : ""}
+              onClick={() => setClusterType("homogeneous")}
+            >
+              Homogeneous
+            </button>
+            <button
+              className={clusterType === "heterogeneous" ? "active" : ""}
+              onClick={() => setClusterType("heterogeneous")}
+            >
+              Heterogeneous
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+            {clusterType === "homogeneous"
+              ? "All servers identical (uses .env P_IDLE / P_MAX)."
+              : "Mixed efficient / standard / power-hungry tiers. Same fleet across all agents at the same N for fair comparison."}
+          </div>
+        </div>
+
+        <div className="grid cols-2" style={{ marginTop: 16 }}>
+          <div>
+            <label>Train workload seeds</label>
+            <input
+              type="number"
+              min={1}
+              value={nTrainSeeds}
+              onChange={(e) => setNTrainSeeds(+e.target.value)}
+            />
+            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+              How many distinct workloads to sample from during training.
+              1 = single trajectory (overfit risk). 20-50 = ML-style training set.
+            </div>
+          </div>
+          <div>
+            <label>Test (held-out) seeds</label>
+            <input
+              type="number"
+              min={0}
+              value={nTestSeeds}
+              onChange={(e) => setNTestSeeds(+e.target.value)}
+            />
+            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+              Workloads the agent never trains on, used only for final eval.
+              0 = falls back to legacy "eval episodes" on the train seed.
+            </div>
+          </div>
+        </div>
+
         <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
             <input type="checkbox" checked={useTraces} onChange={(e) => setUseTraces(e.target.checked)} />
@@ -143,6 +202,9 @@ export default function TrainPage() {
                 seed,
                 eval_episodes: evalEps,
                 use_real_traces: useTraces,
+                cluster_type: clusterType,
+                n_train_seeds: nTrainSeeds,
+                n_test_seeds: nTestSeeds,
               })
             }
             disabled={launch.isPending}
@@ -162,6 +224,7 @@ export default function TrainPage() {
               <tr>
                 <th>Run</th>
                 <th>Agent</th>
+                <th>Cluster</th>
                 <th>Status</th>
                 <th>Servers</th>
                 <th>Episodes</th>
@@ -177,6 +240,7 @@ export default function TrainPage() {
                 <tr key={e.run_id} onClick={() => nav(`/results?run=${e.run_id}`)}>
                   <td className="mono" style={{ fontSize: 11 }}>{e.run_id}</td>
                   <td>{e.agent}</td>
+                  <td className="mono" style={{ fontSize: 11 }}>{e.cluster_type || "—"}</td>
                   <td><Badge status={e.status} /></td>
                   <td className="mono">{e.n_servers}</td>
                   <td className="mono">{e.episodes}</td>

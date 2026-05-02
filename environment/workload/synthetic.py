@@ -29,13 +29,26 @@ class SyntheticWorkloadGenerator(WorkloadGenerator):
         self.duration_range = duration_range
         self.sla_multiplier = sla_multiplier
         self.max_jobs = max_jobs
+        self._seed = seed
+        # rng is re-seeded on every reset() so every episode sees the *same*
+        # arrival pattern. This isolates policy effects from arrival noise —
+        # the dominant variance source on Poisson workloads.
         self.rng = np.random.default_rng(seed)
         self._job_counter = 0
         self._total_generated = 0
 
-    def reset(self) -> None:
+    def reset(self, seed: int | None = None) -> None:
+        """Reset arrival counters and re-seed the RNG.
+
+        If `seed` is provided, the workload starts from that seed for this
+        episode; otherwise it falls back to the seed passed at construction
+        time. This is what enables the "train on a pool of seeds, test on
+        a held-out pool" protocol.
+        """
         self._job_counter = 0
         self._total_generated = 0
+        s = seed if seed is not None else self._seed
+        self.rng = np.random.default_rng(s)
 
     def get_next_jobs(self, timestep: int) -> list[Job]:
         if self._total_generated >= self.max_jobs:

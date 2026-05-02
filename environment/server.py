@@ -10,10 +10,17 @@ class Server:
         server_id: int,
         cpu_capacity: float = config.SERVER_CPU_CAPACITY,
         mem_capacity: float = config.SERVER_MEM_CAPACITY,
+        p_idle: float | None = None,
+        p_max: float | None = None,
+        power_alpha: float | None = None,
     ):
         self.server_id = server_id
         self.cpu_capacity = cpu_capacity
         self.mem_capacity = mem_capacity
+        # Per-server power params; None means "fall back to env defaults".
+        self.p_idle = p_idle if p_idle is not None else config.P_IDLE
+        self.p_max = p_max if p_max is not None else config.P_MAX
+        self.power_alpha = power_alpha if power_alpha is not None else config.POWER_ALPHA
         self.running_jobs: list[tuple[Job, int]] = []  # (job, remaining_timesteps)
         self._cpu_used = 0.0
         self._mem_used = 0.0

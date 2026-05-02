@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 AgentName = Literal["dqn", "ppo", "agentic", "round_robin", "sjf", "ffd"]
+ClusterType = Literal["homogeneous", "heterogeneous"]
 RunStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 
 
@@ -16,12 +17,19 @@ class TrainRequest(BaseModel):
     total_steps: int = Field(50_000, ge=100, le=10_000_000,
                              description="PPO only — ignored otherwise")
     use_real_traces: bool = False
+    cluster_type: ClusterType = "homogeneous"
     alpha: float = Field(1.0, ge=0.0, le=100.0,
                          description="Power weight in reward")
     beta: float = Field(50.0, ge=0.0, le=1000.0,
                         description="SLA weight in reward")
     seed: int = 0
     eval_episodes: int = Field(10, ge=0, le=500)
+    # Train/test seed pool sizes for ML-style generalization eval.
+    # n_train_seeds=1, n_test_seeds=0 → legacy single-trajectory training.
+    # n_train_seeds=N, n_test_seeds=M → train uniformly across N seeds,
+    # eval on M held-out seeds.
+    n_train_seeds: int = Field(1, ge=1, le=10_000)
+    n_test_seeds: int = Field(0, ge=0, le=1000)
 
 
 class TrainResponse(BaseModel):

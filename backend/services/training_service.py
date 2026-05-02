@@ -42,8 +42,20 @@ _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 
 
-def _new_run_id(agent: str) -> str:
-    return f"{agent}_{uuid.uuid4().hex[:8]}"
+def _new_run_id(
+    agent: str, cluster_type: str, n_servers: int, seed: int,
+    n_train_seeds: int, n_test_seeds: int,
+) -> str:
+    """Format: <agent>_<homo|het>_n<N>_s<seed>_tr<TR>te<TE>_<uuid>.
+
+    Example: dqn_het_n10_s0_tr20te10_3a83b3da. The tr/te tags make the
+    train/test protocol glanceable.
+    """
+    cluster_tag = "het" if cluster_type == "heterogeneous" else "homo"
+    return (
+        f"{agent}_{cluster_tag}_n{n_servers}_s{seed}_"
+        f"tr{n_train_seeds}te{n_test_seeds}_{uuid.uuid4().hex[:8]}"
+    )
 
 
 def _seed_all(seed: int) -> None:
@@ -51,7 +63,7 @@ def _seed_all(seed: int) -> None:
     torch.manual_seed(seed)
 
 
-def _build_agent(name: str, state_dim: int, n_actions: int):
+def _build_agent(name: str, state_dim: int, n_actions: int, n_servers: int, queue_size: int):
     name = name.lower()
     if name == "dqn":
         return DQNAgent(state_dim=state_dim, n_actions=n_actions)
@@ -60,11 +72,11 @@ def _build_agent(name: str, state_dim: int, n_actions: int):
     if name == "agentic":
         return SupervisorAgent(state_dim=state_dim, n_actions=n_actions)
     if name == "round_robin":
-        return RoundRobinAgent(n_actions=n_actions)
+        return RoundRobinAgent(n_servers=n_servers, queue_size=queue_size)
     if name == "sjf":
-        return ShortestJobFirstAgent(n_servers=n_actions)
+        return ShortestJobFirstAgent(n_servers=n_servers, queue_size=queue_size)
     if name == "ffd":
-        return FirstFitDecreasingAgent(n_servers=n_actions)
+        return FirstFitDecreasingAgent(n_servers=n_servers, queue_size=queue_size)
     raise ValueError(f"Unknown agent: {name}")
 
 
@@ -91,16 +103,29 @@ def list_active() -> list[str]:
 
 
 def start_training(req: TrainRequest) -> str:
-    run_id = _new_run_id(req.agent)
+    run_id = _new_run_id(
+        req.agent, req.cluster_type, req.n_servers, req.seed,
+        req.n_train_seeds, req.n_test_seeds,
+    )
     created_at = datetime.now(timezone.utc).isoformat()
 
-    # Snapshot the env constants that contribute to the optimal-reward
-    # ceiling so it can be recomputed reproducibly later, even if .env
-    # changes between runs.
+    # Snapshot the cluster's actual idle/ceiling power so optimal-reward
+    # is correct for heterogeneous runs (where per-server p_max varies).
+    from environment.fleet import build_fleet
+    _preview_servers = build_fleet(
+        num_servers=req.n_servers,
+        cluster_type=req.cluster_type,
+        seed=0,
+    )
+    sum_p_idle = sum(s.p_idle for s in _preview_servers)
+    sum_p_max = sum(s.p_max for s in _preview_servers)
+
     config_dump = {
         **req.model_dump(),
         "p_idle": env_config.P_IDLE,
         "p_max": env_config.P_MAX,
+        "sum_p_idle": sum_p_idle,
+        "sum_p_max": sum_p_max,
         "invalid_action_penalty": env_config.INVALID_ACTION_PENALTY,
     }
 
@@ -184,16 +209,29 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
         db.update_experiment_status(run_id, "running")
 
         _seed_all(req.seed)
+
+        # Train/test seed pools.
+        # Train seeds: [seed, seed+1, ..., seed + n_train_seeds - 1]
+        # Test seeds:  [seed + 1_000_000, ..., seed + 1_000_000 + n_test_seeds - 1]
+        # The 1M offset guarantees no overlap regardless of n_train_seeds.
+        train_seeds = [req.seed + i for i in range(req.n_train_seeds)]
+        test_seeds = [req.seed + 1_000_000 + i for i in range(req.n_test_seeds)]
+
         env = CloudClusterEnv(
             num_servers=req.n_servers,
             workload_generator=SyntheticWorkloadGenerator(seed=req.seed),
             episode_length=req.episode_length,
             reward_alpha=req.alpha,
             reward_beta=req.beta,
+            cluster_type=req.cluster_type,
+            cluster_seed=0,  # Fixed across all runs of same N → fair comparison.
         )
         state_dim = int(np.prod(env.observation_space.shape))
         n_actions = int(env.action_space.n)
-        agent = _build_agent(req.agent, state_dim, n_actions)
+        agent = _build_agent(
+            req.agent, state_dim, n_actions,
+            n_servers=env.num_servers, queue_size=env.job_queue_size,
+        )
 
         episode_hook = _on_episode(run_id, req.episodes, started_at)
 
@@ -206,10 +244,15 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
             ep_stats = agent.train_loop(
                 env=env, total_steps=req.total_steps,
                 on_episode_end=episode_hook,
+                train_seeds=train_seeds,
             )
         else:
             trainer = Trainer(env=env, agent=agent, run_name=run_id)
-            result = trainer.train(req.episodes, on_episode_end=episode_hook)
+            result = trainer.train(
+                req.episodes,
+                on_episode_end=episode_hook,
+                train_seeds=train_seeds,
+            )
             ep_stats = [
                 {
                     "episode": e.episode,
@@ -235,17 +278,24 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
         except Exception:
             pass
 
-        # eval
+        # Eval — generalization test on held-out test seeds.
+        # If n_test_seeds > 0: eval on those (the proper ML-style protocol).
+        # Else: legacy fallback to eval_episodes runs on the training seed.
         eval_data = None
-        if req.eval_episodes > 0:
+        if req.n_test_seeds > 0 or req.eval_episodes > 0:
             eval_env = CloudClusterEnv(
                 num_servers=req.n_servers,
-                workload_generator=SyntheticWorkloadGenerator(seed=req.seed + 1000),
+                workload_generator=SyntheticWorkloadGenerator(seed=req.seed),
                 episode_length=req.episode_length,
                 reward_alpha=req.alpha,
                 reward_beta=req.beta,
+                cluster_type=req.cluster_type,
+                cluster_seed=0,
             )
-            ev = evaluate(agent, eval_env, n_episodes=req.eval_episodes)
+            if req.n_test_seeds > 0:
+                ev = evaluate(agent, eval_env, workload_seeds=test_seeds)
+            else:
+                ev = evaluate(agent, eval_env, n_episodes=req.eval_episodes)
             eval_data = ev.as_row()
 
         rewards = [s["reward"] for s in ep_stats] if ep_stats else []

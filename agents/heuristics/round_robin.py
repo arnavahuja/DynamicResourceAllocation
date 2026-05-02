@@ -6,11 +6,17 @@ from agents.base_agent import BaseAgent
 
 
 class RoundRobinAgent(BaseAgent):
-    """Cycle through servers 0 → N-1 → 0, skipping any that can't fit the
-    current head-of-queue job. Pure baseline — no learning."""
+    """Always dispatch the head-of-queue job (k=0); cycle through servers
+    0 → N-1 → 0, skipping any that can't fit. This matches the classic
+    head-of-queue RR baseline so comparisons stay fair.
 
-    def __init__(self, n_actions: int):
-        self.n_actions = n_actions
+    Action encoding: k * N + n (joint queue/server action space).
+    """
+
+    def __init__(self, n_servers: int, queue_size: int):
+        self.n_servers = n_servers
+        self.queue_size = queue_size
+        self.wait_action = n_servers * queue_size
         self._cursor = 0
 
     def select_action(
@@ -19,15 +25,16 @@ class RoundRobinAgent(BaseAgent):
         action_mask: np.ndarray,
         greedy: bool = False,
     ) -> int:
-        for offset in range(self.n_actions):
-            idx = (self._cursor + offset) % self.n_actions
-            if action_mask[idx]:
-                self._cursor = (idx + 1) % self.n_actions
-                return int(idx)
-        # No legal action — fall back to current cursor.
-        idx = self._cursor
-        self._cursor = (self._cursor + 1) % self.n_actions
-        return int(idx)
+        N = self.n_servers
+        # Try k=0 (head of queue), rotate through servers.
+        for offset in range(N):
+            n = (self._cursor + offset) % N
+            a = 0 * N + n
+            if action_mask[a]:
+                self._cursor = (n + 1) % N
+                return int(a)
+        # Head-of-queue can't fit anywhere → wait this step.
+        return int(self.wait_action)
 
     def on_episode_end(self) -> None:
         self._cursor = 0

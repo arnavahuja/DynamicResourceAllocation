@@ -48,6 +48,7 @@ class Trainer:
         save_every: int = 500,
         log_every: int = 10,
         wandb_logger=None,
+        log_dir: str | Path = "logs",
     ):
         self.env = env
         self.agent = agent
@@ -57,16 +58,30 @@ class Trainer:
         self.save_every = save_every
         self.log_every = log_every
         self.wandb = wandb_logger
+        # Mirror every printed log line to logs/<run_name>.log so the user can
+        # post the file back for diagnosis instead of copy-pasting from the
+        # terminal. Open in append mode in case of resumed runs.
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+        self.log_path = Path(log_dir) / f"{run_name}.log"
+        self._log_fh = open(self.log_path, "a", buffering=1)  # line-buffered
 
-    def train(self, episodes: int, on_episode_end=None) -> ExperimentResult:
+    def train(self, episodes: int, on_episode_end=None, train_seeds: list[int] | None = None) -> ExperimentResult:
         result = ExperimentResult(
             run_name=self.run_name,
             agent_name=type(self.agent).__name__,
         )
 
+        # If no pool supplied, fall back to whatever seed the workload was
+        # built with (single-trajectory training — Path B legacy behavior).
+        rng = np.random.default_rng(0)
+
         for ep in range(episodes):
             t_start = time.time()
-            obs, _info = self.env.reset()
+            if train_seeds:
+                workload_seed = int(rng.choice(train_seeds))
+                obs, _info = self.env.reset(options={"workload_seed": workload_seed})
+            else:
+                obs, _info = self.env.reset()
             mask = compute_action_mask(self.env)
             ep_reward = 0.0
             ep_power = 0.0
@@ -74,7 +89,7 @@ class Trainer:
             losses: list[float] = []
             last_eps: float | None = None
             steps = 0
-            action_hist = np.zeros(self.env.num_servers, dtype=np.int64)
+            action_hist = np.zeros(int(self.env.action_space.n), dtype=np.int64)
 
             while True:
                 action = self.agent.select_action(obs, mask, greedy=False)
@@ -131,12 +146,26 @@ class Trainer:
             if (ep + 1) % self.log_every == 0 or ep == 0:
                 eps_str = f" eps={last_eps:.3f}" if last_eps is not None else ""
                 loss_str = f" loss={stats.loss_mean:.4f}" if stats.loss_mean else ""
-                hist_str = " act=[" + ",".join(str(c) for c in action_hist) + "]"
-                print(
+                # Marginal histograms over servers, queue-position, and wait —
+                # the joint K*N+1 vector is too wide to print at log_every cadence.
+                N = self.env.num_servers
+                K = self.env.job_queue_size
+                wait_count = int(action_hist[N * K])
+                joint = action_hist[: N * K].reshape(K, N)
+                server_marg = joint.sum(axis=0).tolist()
+                queue_marg = joint.sum(axis=1).tolist()
+                hist_str = (
+                    f" wait={wait_count}"
+                    f" srv={server_marg}"
+                    f" q={queue_marg}"
+                )
+                line = (
                     f"[{self.run_name}] ep {ep+1:5d}/{episodes} "
                     f"R={ep_reward:9.2f} power={ep_power:8.0f} "
                     f"sla={ep_sla:4d} steps={steps:4d}{eps_str}{loss_str}{hist_str}"
                 )
+                print(line)
+                self._log_fh.write(line + "\n")
 
             if self.wandb is not None:
                 self.wandb.log(
@@ -156,4 +185,5 @@ class Trainer:
 
         # final checkpoint
         self.agent.save(str(self.checkpoint_dir / "last.pt"))
+        self._log_fh.close()
         return result
