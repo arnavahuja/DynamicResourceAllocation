@@ -192,6 +192,8 @@ class PPOAgent(BaseAgent):
         total_steps: int,
         on_episode_end: Callable | None = None,
         train_seeds: list[int] | None = None,
+        run_name: str | None = None,
+        log_dir: str = "logs",
     ) -> list[dict]:
         """PPO outer loop. Collects rollouts of `rollout_steps` and updates.
 
@@ -201,10 +203,21 @@ class PPOAgent(BaseAgent):
 
         Returns a list of per-episode summary dicts.
         """
+        from pathlib import Path
         from training.trainer import EpisodeStats  # avoid circular import
 
         ep_stats: list[dict] = []
         seed_rng = np.random.default_rng(0)
+
+        log_fh = None
+        if run_name is not None:
+            Path(log_dir).mkdir(parents=True, exist_ok=True)
+            log_fh = open(Path(log_dir) / f"{run_name}.log", "a", buffering=1)
+
+        def _log(msg: str) -> None:
+            print(msg)
+            if log_fh is not None:
+                log_fh.write(msg + "\n")
 
         def _reset_env():
             if train_seeds:
@@ -284,12 +297,14 @@ class PPOAgent(BaseAgent):
                 returns=ret,
                 masks=np.stack(roll.masks),
             )
-            print(
+            _log(
                 f"[ppo] steps={steps_done:7d} "
                 f"pol={losses['policy']:.4f} val={losses['value']:.4f} "
                 f"ent={losses['entropy']:.4f} eps_collected={ep_idx}"
             )
 
+        if log_fh is not None:
+            log_fh.close()
         return ep_stats
 
     # ---------- persistence ----------

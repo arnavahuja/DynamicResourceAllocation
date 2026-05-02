@@ -21,7 +21,7 @@ const AGENTS = [
 // module is re-evaluated. This is the behavior the user asked for.
 const FORM_DEFAULTS = {
   agent: "dqn",
-  nServers: 10,
+  nServers: 50,
   episodes: 200,
   epLen: 500,
   alpha: 1.0,

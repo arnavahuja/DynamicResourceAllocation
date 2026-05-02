@@ -122,11 +122,23 @@ class SupervisorAgent(BaseAgent):
         episodes: int,
         on_episode_end: Callable | None = None,
         log_every: int = 10,
+        run_name: str | None = None,
+        log_dir: str = "logs",
     ) -> list[dict]:
         from training.trainer import EpisodeStats  # local import avoids cycle
 
         max_cluster_power = config.P_MAX * env.num_servers
         ep_stats: list[dict] = []
+
+        log_fh = None
+        if run_name is not None:
+            Path(log_dir).mkdir(parents=True, exist_ok=True)
+            log_fh = open(Path(log_dir) / f"{run_name}.log", "a", buffering=1)
+
+        def _log(msg: str) -> None:
+            print(msg)
+            if log_fh is not None:
+                log_fh.write(msg + "\n")
 
         for ep in range(episodes):
             obs, _info = env.reset()
@@ -248,7 +260,7 @@ class SupervisorAgent(BaseAgent):
             ep_stats.append(stats.__dict__)
 
             if (ep + 1) % log_every == 0 or ep == 0:
-                print(
+                _log(
                     f"[supervisor] ep {ep+1:5d}/{episodes} "
                     f"R={ep_reward:9.2f} power={ep_power:8.0f} sla={ep_sla:4d} "
                     f"sup_loss={float(policy_loss.item()):.4f} "
@@ -259,6 +271,8 @@ class SupervisorAgent(BaseAgent):
             if on_episode_end is not None:
                 on_episode_end(stats)
 
+        if log_fh is not None:
+            log_fh.close()
         return ep_stats
 
     # ---------- persistence ----------

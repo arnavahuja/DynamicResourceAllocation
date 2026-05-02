@@ -239,12 +239,14 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
             ep_stats = agent.train_loop(
                 env=env, episodes=req.episodes,
                 on_episode_end=episode_hook, log_every=10,
+                run_name=run_id,
             )
         elif isinstance(agent, PPOAgent):
             ep_stats = agent.train_loop(
                 env=env, total_steps=req.total_steps,
                 on_episode_end=episode_hook,
                 train_seeds=train_seeds,
+                run_name=run_id,
             )
         else:
             trainer = Trainer(env=env, agent=agent, run_name=run_id)
