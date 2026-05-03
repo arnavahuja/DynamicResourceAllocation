@@ -144,7 +144,15 @@ class PPOAgent(BaseAgent):
         a = torch.from_numpy(actions).long().to(self.device)
         old_lp = torch.from_numpy(old_log_probs).to(self.device)
         adv = torch.from_numpy(advantages).to(self.device)
-        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+        # Guard against the degenerate case where every advantage is identical
+        # (e.g. saturated episode where every step has the same reward) — then
+        # std≈0 and dividing by 1e-8 would explode the gradient. Skip the
+        # whitening; the policy gets no signal from this batch anyway.
+        adv_std = adv.std()
+        if adv_std > 1e-6:
+            adv = (adv - adv.mean()) / (adv_std + 1e-8)
+        else:
+            adv = adv - adv.mean()
         ret = torch.from_numpy(returns).to(self.device)
         m = torch.from_numpy(masks).to(self.device)
 
@@ -225,6 +233,19 @@ class PPOAgent(BaseAgent):
                 return env.reset(options={"workload_seed": ws})
             return env.reset()
 
+        try:
+            return self._train_loop_impl(
+                env, total_steps, on_episode_end, train_seeds, _log, _reset_env, ep_stats,
+            )
+        finally:
+            if log_fh is not None and not log_fh.closed:
+                log_fh.close()
+
+    def _train_loop_impl(
+        self, env, total_steps, on_episode_end, train_seeds, _log, _reset_env, ep_stats,
+    ) -> list[dict]:
+        from training.trainer import EpisodeStats  # avoid circular import
+
         steps_done = 0
         obs, _ = _reset_env()
         mask = compute_action_mask(env)
@@ -303,8 +324,6 @@ class PPOAgent(BaseAgent):
                 f"ent={losses['entropy']:.4f} eps_collected={ep_idx}"
             )
 
-        if log_fh is not None:
-            log_fh.close()
         return ep_stats
 
     # ---------- persistence ----------

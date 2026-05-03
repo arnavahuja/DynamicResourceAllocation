@@ -20,5 +20,6 @@ def get_defaults() -> ConfigDefaults:
         sla_multiplier=env_config.SLA_MULTIPLIER,
         synthetic_arrival_rate=env_config.SYNTHETIC_ARRIVAL_RATE,
         real_trace_max_jobs=env_config.REAL_TRACE_MAX_JOBS,
+        trace_sampled_max_jobs=env_config.TRACE_SAMPLED_MAX_JOBS,
         test_seed_offset=env_config.TEST_SEED_OFFSET,
     )

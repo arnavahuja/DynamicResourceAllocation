@@ -5,6 +5,7 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from backend.models import db
+from backend.models.schemas import ExperimentSummary
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
 
@@ -50,7 +51,7 @@ def _row_to_summary(row: dict) -> dict:
     }
 
 
-@router.get("")
+@router.get("", response_model=list[ExperimentSummary])
 def list_all() -> list[dict]:
     return [_row_to_summary(r) for r in db.list_experiments()]
 

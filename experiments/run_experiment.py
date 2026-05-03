@@ -57,7 +57,10 @@ def make_env(n_servers: int, episode_length: int, seed: int) -> CloudClusterEnv:
     )
 
 
-def build_agent(name: str, state_dim: int, n_actions: int) -> BaseAgent:
+def build_agent(
+    name: str, state_dim: int, n_actions: int,
+    n_servers: int, queue_size: int,
+) -> BaseAgent:
     name = name.lower()
     if name == "dqn":
         return DQNAgent(state_dim=state_dim, n_actions=n_actions)
@@ -66,11 +69,11 @@ def build_agent(name: str, state_dim: int, n_actions: int) -> BaseAgent:
     if name == "agentic":
         return SupervisorAgent(state_dim=state_dim, n_actions=n_actions)
     if name == "round_robin":
-        return RoundRobinAgent(n_actions=n_actions)
+        return RoundRobinAgent(n_servers=n_servers, queue_size=queue_size)
     if name == "sjf":
-        return ShortestJobFirstAgent(n_servers=n_actions)
+        return ShortestJobFirstAgent(n_servers=n_servers, queue_size=queue_size)
     if name == "ffd":
-        return FirstFitDecreasingAgent(n_servers=n_actions)
+        return FirstFitDecreasingAgent(n_servers=n_servers, queue_size=queue_size)
     raise ValueError(f"Unknown agent: {name}")
 
 
@@ -81,7 +84,10 @@ def cmd_train(args: argparse.Namespace) -> int:
     env = make_env(args.n_servers, args.episode_length, args.seed)
     state_dim = int(np.prod(env.observation_space.shape))
     n_actions = int(env.action_space.n)
-    agent = build_agent(args.agent, state_dim, n_actions)
+    agent = build_agent(
+        args.agent, state_dim, n_actions,
+        n_servers=env.num_servers, queue_size=env.job_queue_size,
+    )
 
     run_name = args.run_name or f"{args.agent}_n{args.n_servers}_s{args.seed}"
     cfg_dump = {
@@ -202,10 +208,12 @@ def cmd_compare(args: argparse.Namespace) -> int:
     state_dim = int(np.prod(eval_env.observation_space.shape))
     n_actions = int(eval_env.action_space.n)
 
+    qs = eval_env.job_queue_size
+    ns = eval_env.num_servers
     agents: list[tuple[str, BaseAgent]] = [
-        ("RoundRobin", RoundRobinAgent(n_actions=n_actions)),
-        ("ShortestJobFirst", ShortestJobFirstAgent(n_servers=n_actions)),
-        ("FirstFitDecreasing", FirstFitDecreasingAgent(n_servers=n_actions)),
+        ("RoundRobin", RoundRobinAgent(n_servers=ns, queue_size=qs)),
+        ("ShortestJobFirst", ShortestJobFirstAgent(n_servers=ns, queue_size=qs)),
+        ("FirstFitDecreasing", FirstFitDecreasingAgent(n_servers=ns, queue_size=qs)),
     ]
 
     if args.dqn_checkpoint:
@@ -263,6 +271,8 @@ def main() -> int:
                     help="Path to supervisor checkpoint (sub-agents auto-loaded)")
     pc.add_argument("--cmdp-checkpoint", default=None,
                     help="Path to offline CMDP agent checkpoint")
+    pc.add_argument("--eval-episodes", type=int, default=20)
+    pc.set_defaults(func=cmd_compare)
 
     po = sub.add_parser("offline", help="Train CMDP from a logged-transitions Parquet")
     po.add_argument("--dataset", required=True, help="Path to offline.parquet")
@@ -278,8 +288,6 @@ def main() -> int:
     po.add_argument("--run-name", default=None)
     po.add_argument("--eval-episodes", type=int, default=10)
     po.set_defaults(func=cmd_offline)
-    pc.add_argument("--eval-episodes", type=int, default=20)
-    pc.set_defaults(func=cmd_compare)
 
     args = p.parse_args()
     return args.func(args)

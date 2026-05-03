@@ -50,6 +50,7 @@ class ConfigDefaults(BaseModel):
     sla_multiplier: float
     synthetic_arrival_rate: float
     real_trace_max_jobs: int
+    trace_sampled_max_jobs: int
     test_seed_offset: int
 
 
@@ -69,11 +70,14 @@ class ExperimentSummary(BaseModel):
     agent: str
     status: RunStatus
     created_at: str
-    n_servers: int
-    episodes: int
+    n_servers: int | None = None
+    episodes: int | None = None
+    cluster_type: ClusterType = "homogeneous"
     mean_reward_last10: float | None = None
     mean_power: float | None = None
     sla_violation_rate: float | None = None
+    optimal_reward: float | None = None
+    gap_pct: float | None = None
 
 
 class EpisodePoint(BaseModel):

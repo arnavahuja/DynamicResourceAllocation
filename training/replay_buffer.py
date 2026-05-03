@@ -48,7 +48,16 @@ class ReplayBuffer:
         return len(self._buf)
 
     def sample(self, batch_size: int, device: torch.device) -> dict[str, torch.Tensor]:
-        idx = np.random.choice(len(self._buf), size=batch_size, replace=False)
+        # Guard the underflow case explicitly — np.random.choice(replace=False)
+        # raises a confusing ValueError when buffer < batch. The DQN learn-step
+        # already checks `len < batch`, so reaching this with too few items is
+        # always a logic bug; surface it loudly rather than via numpy internals.
+        n = len(self._buf)
+        if n < batch_size:
+            raise ValueError(
+                f"ReplayBuffer.sample requested {batch_size} but buffer holds {n}"
+            )
+        idx = np.random.choice(n, size=batch_size, replace=False)
         batch = [self._buf[i] for i in idx]
         return {
             "state": torch.from_numpy(np.stack([t.state for t in batch])).to(device),

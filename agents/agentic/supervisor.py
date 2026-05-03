@@ -143,6 +143,21 @@ class SupervisorAgent(BaseAgent):
 
         seed_rng = np.random.default_rng(0)
 
+        try:
+            return self._run_episodes(
+                env, episodes, on_episode_end, log_every,
+                max_cluster_power, ep_stats, _log, train_seeds, seed_rng,
+            )
+        finally:
+            if log_fh is not None and not log_fh.closed:
+                log_fh.close()
+
+    def _run_episodes(
+        self, env, episodes, on_episode_end, log_every,
+        max_cluster_power, ep_stats, _log, train_seeds, seed_rng,
+    ) -> list[dict]:
+        from training.trainer import EpisodeStats  # local import avoids cycle
+
         for ep in range(episodes):
             if train_seeds:
                 workload_seed = int(seed_rng.choice(train_seeds))
@@ -244,7 +259,14 @@ class SupervisorAgent(BaseAgent):
                 G = r + config.GAMMA * G
                 returns.insert(0, G)
             ret_t = torch.tensor(returns, dtype=torch.float32, device=self.device)
-            ret_t = (ret_t - ret_t.mean()) / (ret_t.std() + 1e-8)
+            # Saturated episodes can produce constant returns → std≈0 → gradient
+            # explosion via the 1e-8 epsilon. Skip whitening when the signal is
+            # too flat to learn from anyway.
+            ret_std = ret_t.std()
+            if ret_std > 1e-6:
+                ret_t = (ret_t - ret_t.mean()) / (ret_std + 1e-8)
+            else:
+                ret_t = ret_t - ret_t.mean()
             log_probs_t = torch.cat(log_probs)
             entropy_t = torch.cat(entropies).mean()
             policy_loss = -(log_probs_t * ret_t).mean() - self.entropy_coef * entropy_t
@@ -278,8 +300,6 @@ class SupervisorAgent(BaseAgent):
             if on_episode_end is not None:
                 on_episode_end(stats)
 
-        if log_fh is not None:
-            log_fh.close()
         return ep_stats
 
     # ---------- persistence ----------

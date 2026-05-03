@@ -66,6 +66,16 @@ class Trainer:
         self._log_fh = open(self.log_path, "a", buffering=1)  # line-buffered
 
     def train(self, episodes: int, on_episode_end=None, train_seeds: list[int] | None = None) -> ExperimentResult:
+        try:
+            return self._train_impl(episodes, on_episode_end, train_seeds)
+        finally:
+            # Always close the log handle, even if training crashes — otherwise
+            # the partial log on disk is missing whatever the final exception
+            # would have written through line-buffered flushes.
+            if self._log_fh and not self._log_fh.closed:
+                self._log_fh.close()
+
+    def _train_impl(self, episodes: int, on_episode_end, train_seeds) -> ExperimentResult:
         result = ExperimentResult(
             run_name=self.run_name,
             agent_name=type(self.agent).__name__,
@@ -185,5 +195,4 @@ class Trainer:
 
         # final checkpoint
         self.agent.save(str(self.checkpoint_dir / "last.pt"))
-        self._log_fh.close()
         return result
