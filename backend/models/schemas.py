@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from environment import config as env_config
+
 AgentName = Literal["dqn", "ppo", "agentic", "round_robin", "sjf", "ffd"]
 ClusterType = Literal["homogeneous", "heterogeneous"]
 TraceFamily = Literal["alibaba", "google_v2", "google_v3", "google_v2_sampled"]
@@ -12,17 +14,17 @@ RunStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 
 class TrainRequest(BaseModel):
     agent: AgentName = "dqn"
-    n_servers: int = Field(10, ge=1, le=200)
+    n_servers: int = Field(env_config.NUM_SERVERS, ge=1, le=200)
     episodes: int = Field(200, ge=1, le=100_000)
-    episode_length: int = Field(500, ge=10, le=10_000)
+    episode_length: int = Field(env_config.EPISODE_LENGTH, ge=10, le=10_000)
     total_steps: int = Field(50_000, ge=100, le=10_000_000,
                              description="PPO only — ignored otherwise")
     use_real_traces: bool = False
     trace_family: TraceFamily = "alibaba"
     cluster_type: ClusterType = "homogeneous"
-    alpha: float = Field(1.0, ge=0.0, le=100.0,
+    alpha: float = Field(env_config.REWARD_ALPHA, ge=0.0, le=100.0,
                          description="Power weight in reward")
-    beta: float = Field(50.0, ge=0.0, le=1000.0,
+    beta: float = Field(env_config.REWARD_BETA, ge=0.0, le=1000.0,
                         description="SLA weight in reward")
     seed: int = 0
     eval_episodes: int = Field(10, ge=0, le=500)
@@ -36,6 +38,19 @@ class TrainRequest(BaseModel):
 
 class TrainResponse(BaseModel):
     run_id: str
+
+
+class ConfigDefaults(BaseModel):
+    """Runtime defaults the frontend should hydrate its form with — single
+    source of truth lives in `environment/config.py`."""
+    n_servers: int
+    episode_length: int
+    alpha: float
+    beta: float
+    sla_multiplier: float
+    synthetic_arrival_rate: float
+    real_trace_max_jobs: int
+    test_seed_offset: int
 
 
 class RunStatusResponse(BaseModel):

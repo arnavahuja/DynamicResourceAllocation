@@ -18,12 +18,15 @@ const AGENTS = [
 
 // Module-level cache: persists while the SPA is mounted (i.e. while you
 // navigate between tabs) but is wiped on full page reload, since the JS
-// module is re-evaluated. This is the behavior the user asked for.
+// module is re-evaluated. The numeric/env-tunable fields (nServers, epLen,
+// alpha, beta) are hydrated from /api/config/defaults so they always match
+// environment/config.py. The fallbacks below are only used until that fetch
+// resolves on first mount.
 const FORM_DEFAULTS = {
   agent: "dqn",
-  nServers: 50,
+  nServers: 10,
   episodes: 200,
-  epLen: 500,
+  epLen: 1000,
   alpha: 1.0,
   beta: 50.0,
   seed: 0,
@@ -35,6 +38,7 @@ const FORM_DEFAULTS = {
   nTestSeeds: 0,
 };
 const formCache = { ...FORM_DEFAULTS };
+let _defaultsHydrated = false;
 
 export default function TrainPage() {
   const nav = useNavigate();
@@ -53,6 +57,22 @@ export default function TrainPage() {
   const [clusterType, setClusterType] = useState(() => formCache.clusterType);
   const [nTrainSeeds, setNTrainSeeds] = useState(() => formCache.nTrainSeeds);
   const [nTestSeeds, setNTestSeeds] = useState(() => formCache.nTestSeeds);
+
+  // Hydrate from backend on first mount — keeps form defaults in lockstep
+  // with environment/config.py so retuning the reward weights or default
+  // cluster size doesn't require a frontend edit.
+  useEffect(() => {
+    if (_defaultsHydrated) return;
+    api.configDefaults()
+      .then((d) => {
+        _defaultsHydrated = true;
+        if (d.n_servers != null) { formCache.nServers = d.n_servers; setNServers(d.n_servers); }
+        if (d.episode_length != null) { formCache.epLen = d.episode_length; setEpLen(d.episode_length); }
+        if (d.alpha != null) { formCache.alpha = d.alpha; setAlpha(d.alpha); }
+        if (d.beta != null) { formCache.beta = d.beta; setBeta(d.beta); }
+      })
+      .catch(() => { /* fall back to hardcoded FORM_DEFAULTS */ });
+  }, []);
 
   // Mirror every state change back to the module-level cache so the next
   // mount of TrainPage (after a tab switch) reads the up-to-date values.

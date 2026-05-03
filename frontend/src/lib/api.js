@@ -14,6 +14,7 @@ async function jsonFetch(path, opts = {}) {
 
 export const api = {
   health: () => jsonFetch("/health"),
+  configDefaults: () => jsonFetch("/config/defaults"),
   startTraining: (body) =>
     jsonFetch("/train", { method: "POST", body: JSON.stringify(body) }),
   trainStatus: (runId) => jsonFetch(`/train/${runId}/status`),

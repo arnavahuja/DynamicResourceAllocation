@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from environment import config
 from environment.job import Job
 from environment.workload.base import WorkloadGenerator
 
@@ -31,7 +32,7 @@ class AlibabaWorkloadGenerator(WorkloadGenerator):
         self,
         trace_path: str | Path,
         timestep_duration_s: int = 300,  # 5 minutes per timestep
-        sla_multiplier: float = 2.0,
+        sla_multiplier: float = config.SLA_MULTIPLIER,
         cpu_normalize_factor: float = 9600.0,  # 96 cores * 100 (Alibaba uses 100x units)
         max_jobs: int | None = None,
     ):
@@ -43,6 +44,7 @@ class AlibabaWorkloadGenerator(WorkloadGenerator):
 
         self._jobs_by_timestep: dict[int, list[Job]] = {}
         self._max_timestep = 0
+        self._current_timestep = 0
         self._loaded = False
 
     def _load(self) -> None:
@@ -109,14 +111,16 @@ class AlibabaWorkloadGenerator(WorkloadGenerator):
         # `seed` ignored — trace replay is deterministic.
         if not self._loaded:
             self._load()
+        self._current_timestep = 0
 
     def get_next_jobs(self, timestep: int) -> list[Job]:
         if not self._loaded:
             self._load()
+        self._current_timestep = timestep
         raw_jobs = self._jobs_by_timestep.get(timestep, [])
         for job in raw_jobs:
             job.arrival_time = timestep
         return raw_jobs
 
     def is_exhausted(self) -> bool:
-        return False
+        return self._loaded and self._current_timestep > self._max_timestep

@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from environment import config
 from environment.job import Job
 from environment.workload.base import WorkloadGenerator
 from environment.workload.google_v2 import GoogleV2WorkloadGenerator
@@ -23,8 +24,8 @@ class TraceSampledWorkloadGenerator(WorkloadGenerator):
     def __init__(
         self,
         trace_dir: str | Path,
-        arrival_rate: float = 0.8,
-        sla_multiplier: float = 1.6,
+        arrival_rate: float = config.SYNTHETIC_ARRIVAL_RATE,
+        sla_multiplier: float = config.SLA_MULTIPLIER,
         max_jobs: int = 5000,
         seed: int | None = None,
         source: str = "google_v2",

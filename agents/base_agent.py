@@ -26,10 +26,15 @@ class BaseAgent(ABC):
         """Hook called after each episode."""
 
     def save(self, path: str) -> None:
-        """Persist agent state to disk. No-op by default."""
+        """Persist agent state to disk. Default writes a marker file so callers
+        can distinguish a stateless agent (heuristics) from a silent failure."""
+        from pathlib import Path
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"stateless-agent:{type(self).__name__}\n")
 
     def load(self, path: str) -> None:
-        """Restore agent state from disk. No-op by default."""
+        """Restore agent state from disk. No-op for stateless agents."""
 
 
 def compute_action_mask(env: CloudClusterEnv) -> np.ndarray:

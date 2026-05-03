@@ -124,6 +124,7 @@ class SupervisorAgent(BaseAgent):
         log_every: int = 10,
         run_name: str | None = None,
         log_dir: str = "logs",
+        train_seeds: list[int] | None = None,
     ) -> list[dict]:
         from training.trainer import EpisodeStats  # local import avoids cycle
 
@@ -140,8 +141,14 @@ class SupervisorAgent(BaseAgent):
             if log_fh is not None:
                 log_fh.write(msg + "\n")
 
+        seed_rng = np.random.default_rng(0)
+
         for ep in range(episodes):
-            obs, _info = env.reset()
+            if train_seeds:
+                workload_seed = int(seed_rng.choice(train_seeds))
+                obs, _info = env.reset(options={"workload_seed": workload_seed})
+            else:
+                obs, _info = env.reset()
             mask = compute_action_mask(env)
             sla_budget_remaining = float(self.sla_budget_per_episode)
             last_power_norm = 0.0

@@ -45,6 +45,10 @@ _executor = ThreadPoolExecutor(max_workers=4)
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 
+# Shared log directory across Trainer / PPOAgent / SupervisorAgent so every
+# agent's per-run log lands in the same place regardless of agent family.
+LOG_DIR = "logs"
+
 
 def _new_run_id(
     agent: str, cluster_type: str, n_servers: int, seed: int,
@@ -81,13 +85,10 @@ def _build_workload(req: TrainRequest):
 
     repo_root = Path(__file__).resolve().parents[2]
     fam = req.trace_family
-    # Cap jobs hard — these traces are from huge production clusters
-    # (Alibaba: 4K nodes, Google v2: 12.5K machines). For a 50-server study
-    # cluster, real-trace arrivals are bursty enough that >500 jobs saturates
-    # the queue and every job misses its SLA — making the comparison vacuous
-    # (every agent looks identical at ~99% violation rate). Tune up if the
-    # cluster is sized larger.
-    MAX_JOBS = 500
+    # Real-trace cap lives in env_config (REAL_TRACE_MAX_JOBS) — these traces
+    # are from huge production clusters and >cap arrivals saturate a 50-server
+    # study cluster, making every agent look identical at ~99% SLA violations.
+    MAX_JOBS = env_config.REAL_TRACE_MAX_JOBS
     if fam == "alibaba":
         return AlibabaWorkloadGenerator(
             trace_path=str(repo_root / "data/raw/alibaba/batch_task*.csv"),
@@ -108,7 +109,7 @@ def _build_workload(req: TrainRequest):
         # the saturation that pure replay causes on small study clusters.
         return TraceSampledWorkloadGenerator(
             trace_dir=str(repo_root / "data/raw/google_v2"),
-            max_jobs=5000,
+            max_jobs=env_config.TRACE_SAMPLED_MAX_JOBS,
             seed=req.seed,
             source="google_v2",
         )
@@ -167,7 +168,7 @@ def start_training(req: TrainRequest) -> str:
     _preview_servers = build_fleet(
         num_servers=req.n_servers,
         cluster_type=req.cluster_type,
-        seed=0,
+        seed=env_config.FLEET_CLUSTER_SEED,
     )
     sum_p_idle = sum(s.p_idle for s in _preview_servers)
     sum_p_max = sum(s.p_max for s in _preview_servers)
@@ -235,19 +236,22 @@ def _on_episode(run_id: str, total: int, started_at: float):
             sla_violations=stats.sla_violations,
             steps=stats.steps,
         )
-        bus.publish_threadsafe(
-            run_id,
-            {
-                "event": "episode",
-                "episode": stats.episode,
-                "reward": stats.reward,
-                "power": stats.power,
-                "sla_violations": stats.sla_violations,
-                "steps": stats.steps,
-                "epsilon": stats.epsilon,
-                "loss_mean": stats.loss_mean,
-            },
-        )
+        payload = {
+            "event": "episode",
+            "episode": stats.episode,
+            "reward": stats.reward,
+            "power": stats.power,
+            "sla_violations": stats.sla_violations,
+            "steps": stats.steps,
+        }
+        # Only include agent-specific fields when populated — PPO and the
+        # supervisor's REINFORCE head don't have an ε; sending None forces
+        # the frontend to render NaNs in the live charts.
+        if stats.epsilon is not None:
+            payload["epsilon"] = stats.epsilon
+        if stats.loss_mean is not None:
+            payload["loss_mean"] = stats.loss_mean
+        bus.publish_threadsafe(run_id, payload)
 
     return hook
 
@@ -264,8 +268,8 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
 
         # Train/test seed pools.
         # Train seeds: [seed, seed+1, ..., seed + n_train_seeds - 1]
-        # Test seeds:  [seed + 1_000_000, ..., seed + 1_000_000 + n_test_seeds - 1]
-        # The 1M offset guarantees no overlap regardless of n_train_seeds.
+        # Test seeds:  [seed + TEST_SEED_OFFSET, ..., seed + TEST_SEED_OFFSET + n_test_seeds - 1]
+        # The offset (default 1M, see env_config) guarantees no overlap regardless of n_train_seeds.
         # Real-trace runs override both to a single fixed trajectory since
         # replay is deterministic.
         if req.use_real_traces:
@@ -273,7 +277,7 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
             test_seeds: list[int] = []
         else:
             train_seeds = [req.seed + i for i in range(req.n_train_seeds)]
-            test_seeds = [req.seed + 1_000_000 + i for i in range(req.n_test_seeds)]
+            test_seeds = [req.seed + env_config.TEST_SEED_OFFSET + i for i in range(req.n_test_seeds)]
 
         env = CloudClusterEnv(
             num_servers=req.n_servers,
@@ -282,7 +286,7 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
             reward_alpha=req.alpha,
             reward_beta=req.beta,
             cluster_type=req.cluster_type,
-            cluster_seed=0,  # Fixed across all runs of same N → fair comparison.
+            cluster_seed=env_config.FLEET_CLUSTER_SEED,  # Fixed across all runs of same N → fair comparison.
         )
         state_dim = int(np.prod(env.observation_space.shape))
         n_actions = int(env.action_space.n)
@@ -298,6 +302,8 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
                 env=env, episodes=req.episodes,
                 on_episode_end=episode_hook, log_every=10,
                 run_name=run_id,
+                log_dir=LOG_DIR,
+                train_seeds=train_seeds,
             )
         elif isinstance(agent, PPOAgent):
             ep_stats = agent.train_loop(
@@ -305,9 +311,10 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
                 on_episode_end=episode_hook,
                 train_seeds=train_seeds,
                 run_name=run_id,
+                log_dir=LOG_DIR,
             )
         else:
-            trainer = Trainer(env=env, agent=agent, run_name=run_id)
+            trainer = Trainer(env=env, agent=agent, run_name=run_id, log_dir=LOG_DIR)
             result = trainer.train(
                 req.episodes,
                 on_episode_end=episode_hook,
@@ -350,7 +357,7 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
                 reward_alpha=req.alpha,
                 reward_beta=req.beta,
                 cluster_type=req.cluster_type,
-                cluster_seed=0,
+                cluster_seed=env_config.FLEET_CLUSTER_SEED,
             )
             if test_seeds:
                 ev = evaluate(agent, eval_env, workload_seeds=test_seeds)

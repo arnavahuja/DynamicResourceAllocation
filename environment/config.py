@@ -46,8 +46,18 @@ POWER_ALPHA: float = _f("POWER_ALPHA", 1.4)
 
 # ── SLA / reward ────────────────────────────────────────────────
 SLA_LATENCY_DEADLINE: int = _i("SLA_LATENCY_DEADLINE", 10)
+SLA_MULTIPLIER: float = _f("SLA_MULTIPLIER", 1.6)
 REWARD_ALPHA: float = _f("ALPHA", 1.0)
 REWARD_BETA: float = _f("BETA", 50.0)
+
+# ── Workload generation ─────────────────────────────────────────
+SYNTHETIC_ARRIVAL_RATE: float = _f("SYNTHETIC_ARRIVAL_RATE", 0.8)
+REAL_TRACE_MAX_JOBS: int = _i("REAL_TRACE_MAX_JOBS", 500)
+TRACE_SAMPLED_MAX_JOBS: int = _i("TRACE_SAMPLED_MAX_JOBS", 5000)
+
+# ── Experiment protocol ─────────────────────────────────────────
+FLEET_CLUSTER_SEED: int = _i("FLEET_CLUSTER_SEED", 0)
+TEST_SEED_OFFSET: int = _i("TEST_SEED_OFFSET", 1_000_000)
 
 # ── Episode ─────────────────────────────────────────────────────
 JOB_QUEUE_SIZE: int = _i("MAX_QUEUE_SIZE", 5)
