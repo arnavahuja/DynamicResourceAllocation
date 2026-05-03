@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 AgentName = Literal["dqn", "ppo", "agentic", "round_robin", "sjf", "ffd"]
 ClusterType = Literal["homogeneous", "heterogeneous"]
+TraceFamily = Literal["alibaba", "google_v2", "google_v3", "google_v2_sampled"]
 RunStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 
 
@@ -17,6 +18,7 @@ class TrainRequest(BaseModel):
     total_steps: int = Field(50_000, ge=100, le=10_000_000,
                              description="PPO only — ignored otherwise")
     use_real_traces: bool = False
+    trace_family: TraceFamily = "alibaba"
     cluster_type: ClusterType = "homogeneous"
     alpha: float = Field(1.0, ge=0.0, le=100.0,
                          description="Power weight in reward")

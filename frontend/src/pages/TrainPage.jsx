@@ -29,6 +29,7 @@ const FORM_DEFAULTS = {
   seed: 0,
   evalEps: 10,
   useTraces: false,
+  traceFamily: "alibaba",
   clusterType: "homogeneous",
   nTrainSeeds: 1,
   nTestSeeds: 0,
@@ -48,6 +49,7 @@ export default function TrainPage() {
   const [seed, setSeed] = useState(() => formCache.seed);
   const [evalEps, setEvalEps] = useState(() => formCache.evalEps);
   const [useTraces, setUseTraces] = useState(() => formCache.useTraces);
+  const [traceFamily, setTraceFamily] = useState(() => formCache.traceFamily);
   const [clusterType, setClusterType] = useState(() => formCache.clusterType);
   const [nTrainSeeds, setNTrainSeeds] = useState(() => formCache.nTrainSeeds);
   const [nTestSeeds, setNTestSeeds] = useState(() => formCache.nTestSeeds);
@@ -56,10 +58,10 @@ export default function TrainPage() {
   // mount of TrainPage (after a tab switch) reads the up-to-date values.
   useEffect(() => {
     Object.assign(formCache, {
-      agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces, clusterType,
+      agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces, traceFamily, clusterType,
       nTrainSeeds, nTestSeeds,
     });
-  }, [agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces, clusterType, nTrainSeeds, nTestSeeds]);
+  }, [agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces, traceFamily, clusterType, nTrainSeeds, nTestSeeds]);
 
   const { data: experiments = [] } = useQuery({
     queryKey: ["experiments"],
@@ -181,11 +183,22 @@ export default function TrainPage() {
           </div>
         </div>
 
-        <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
             <input type="checkbox" checked={useTraces} onChange={(e) => setUseTraces(e.target.checked)} />
             Use real cluster traces
           </label>
+          {useTraces && (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
+              Trace:
+              <select value={traceFamily} onChange={(e) => setTraceFamily(e.target.value)}>
+                <option value="alibaba">Alibaba 2018</option>
+                <option value="google_v2">Google v2 (2011)</option>
+                <option value="google_v3">Google v3 (2019)</option>
+                <option value="google_v2_sampled">Google v2 (sampled + Poisson)</option>
+              </select>
+            </label>
+          )}
         </div>
 
         <div style={{ marginTop: 20, display: "flex", gap: 12, alignItems: "center" }}>
@@ -202,6 +215,7 @@ export default function TrainPage() {
                 seed,
                 eval_episodes: evalEps,
                 use_real_traces: useTraces,
+                trace_family: traceFamily,
                 cluster_type: clusterType,
                 n_train_seeds: nTrainSeeds,
                 n_test_seeds: nTestSeeds,

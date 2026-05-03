@@ -33,7 +33,11 @@ from backend.services import gcp_service
 from backend.models.schemas import TrainRequest
 from environment import config as env_config
 from environment.cluster_env import CloudClusterEnv
+from environment.workload.alibaba import AlibabaWorkloadGenerator
+from environment.workload.google_v2 import GoogleV2WorkloadGenerator
+from environment.workload.google_v3 import GoogleV3WorkloadGenerator
 from environment.workload.synthetic import SyntheticWorkloadGenerator
+from environment.workload.trace_sampled import TraceSampledWorkloadGenerator
 from training.evaluator import evaluate
 from training.trainer import EpisodeStats, Trainer
 
@@ -61,6 +65,54 @@ def _new_run_id(
 def _seed_all(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+
+def _build_workload(req: TrainRequest):
+    """Pick a workload generator based on request flags.
+
+    Real-trace generators ignore `seed` (replay is deterministic). Returns
+    a generator instance; the caller is responsible for env wiring.
+
+    Trace paths are anchored to the repo root so uvicorn's CWD doesn't
+    matter.
+    """
+    if not req.use_real_traces:
+        return SyntheticWorkloadGenerator(seed=req.seed)
+
+    repo_root = Path(__file__).resolve().parents[2]
+    fam = req.trace_family
+    # Cap jobs hard — these traces are from huge production clusters
+    # (Alibaba: 4K nodes, Google v2: 12.5K machines). For a 50-server study
+    # cluster, real-trace arrivals are bursty enough that >500 jobs saturates
+    # the queue and every job misses its SLA — making the comparison vacuous
+    # (every agent looks identical at ~99% violation rate). Tune up if the
+    # cluster is sized larger.
+    MAX_JOBS = 500
+    if fam == "alibaba":
+        return AlibabaWorkloadGenerator(
+            trace_path=str(repo_root / "data/raw/alibaba/batch_task*.csv"),
+            max_jobs=MAX_JOBS,
+        )
+    if fam == "google_v2":
+        return GoogleV2WorkloadGenerator(
+            trace_dir=str(repo_root / "data/raw/google_v2"),
+            max_jobs=MAX_JOBS,
+        )
+    if fam == "google_v3":
+        return GoogleV3WorkloadGenerator(
+            trace_dir=str(repo_root / "data/raw/google_v3"),
+            max_jobs=MAX_JOBS,
+        )
+    if fam == "google_v2_sampled":
+        # Trace-distribution job specs + synthetic Poisson timing → avoids
+        # the saturation that pure replay causes on small study clusters.
+        return TraceSampledWorkloadGenerator(
+            trace_dir=str(repo_root / "data/raw/google_v2"),
+            max_jobs=5000,
+            seed=req.seed,
+            source="google_v2",
+        )
+    raise ValueError(f"Unknown trace_family: {fam}")
 
 
 def _build_agent(name: str, state_dim: int, n_actions: int, n_servers: int, queue_size: int):
@@ -214,12 +266,18 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
         # Train seeds: [seed, seed+1, ..., seed + n_train_seeds - 1]
         # Test seeds:  [seed + 1_000_000, ..., seed + 1_000_000 + n_test_seeds - 1]
         # The 1M offset guarantees no overlap regardless of n_train_seeds.
-        train_seeds = [req.seed + i for i in range(req.n_train_seeds)]
-        test_seeds = [req.seed + 1_000_000 + i for i in range(req.n_test_seeds)]
+        # Real-trace runs override both to a single fixed trajectory since
+        # replay is deterministic.
+        if req.use_real_traces:
+            train_seeds: list[int] = []
+            test_seeds: list[int] = []
+        else:
+            train_seeds = [req.seed + i for i in range(req.n_train_seeds)]
+            test_seeds = [req.seed + 1_000_000 + i for i in range(req.n_test_seeds)]
 
         env = CloudClusterEnv(
             num_servers=req.n_servers,
-            workload_generator=SyntheticWorkloadGenerator(seed=req.seed),
+            workload_generator=_build_workload(req),
             episode_length=req.episode_length,
             reward_alpha=req.alpha,
             reward_beta=req.beta,
@@ -287,14 +345,14 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
         if req.n_test_seeds > 0 or req.eval_episodes > 0:
             eval_env = CloudClusterEnv(
                 num_servers=req.n_servers,
-                workload_generator=SyntheticWorkloadGenerator(seed=req.seed),
+                workload_generator=_build_workload(req),
                 episode_length=req.episode_length,
                 reward_alpha=req.alpha,
                 reward_beta=req.beta,
                 cluster_type=req.cluster_type,
                 cluster_seed=0,
             )
-            if req.n_test_seeds > 0:
+            if test_seeds:
                 ev = evaluate(agent, eval_env, workload_seeds=test_seeds)
             else:
                 ev = evaluate(agent, eval_env, n_episodes=req.eval_episodes)

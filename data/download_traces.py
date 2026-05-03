@@ -84,22 +84,27 @@ def download_alibaba(skip: bool) -> Path:
     if not _have("curl") and not _have("wget"):
         print("\n[!] Need curl or wget to fetch Alibaba traces.")
         return target
+    # Alibaba 2018 cluster trace is hosted on Aliyun OSS, not on GitHub.
+    # The repo (github.com/alibaba/clusterdata) only contains docs.
     url = (
-        "https://github.com/alibaba/clusterdata/raw/master/cluster-trace-v2018/"
-        "trace_2018.zip"
+        "http://aliopentrace.oss-cn-beijing.aliyuncs.com/"
+        "v2018Trace/batch_task.tar.gz"
     )
-    out = target / "trace_2018.zip"
-    if not out.exists():
+    out = target / "batch_task.tar.gz"
+    if not out.exists() or out.stat().st_size < 1_000_000:
+        # Re-fetch if missing or suspiciously small (previous HTML 404s).
         cmd = ["curl", "-L", "-o", str(out), url] if _have("curl") else ["wget", "-O", str(out), url]
         ok = _try_run(cmd)
         if not ok:
             print(
                 f"\n[!] Could not fetch {url}.\n"
-                f"    Download the Alibaba 2018 trace manually and put batch_task.csv in {target}."
+                f"    Download the Alibaba 2018 trace manually from Tianchi:\n"
+                f"      https://tianchi.aliyun.com/dataset/dataDetail?dataId=78\n"
+                f"    and put batch_task.csv in {target}."
             )
             return target
-    if _have("unzip"):
-        _try_run(["unzip", "-n", "-o", str(out), "-d", str(target)])
+    if _have("tar"):
+        _try_run(["tar", "-xzf", str(out), "-C", str(target)])
     return target
 
 

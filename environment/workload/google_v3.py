@@ -134,7 +134,8 @@ class GoogleV3WorkloadGenerator(WorkloadGenerator):
         self._max_timestep = max(self._jobs_by_timestep.keys()) if self._jobs_by_timestep else 0
         self._loaded = True
 
-    def reset(self) -> None:
+    def reset(self, seed: int | None = None) -> None:
+        # `seed` ignored — trace replay is deterministic.
         if not self._loaded:
             self._load()
 

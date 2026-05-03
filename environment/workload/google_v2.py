@@ -74,10 +74,15 @@ class GoogleV2WorkloadGenerator(WorkloadGenerator):
 
     def _load(self) -> None:
         """Load and parse task_events CSV files."""
-        csv_files = sorted(self.trace_dir.glob("task_events*.csv*"))
+        # The Google 2011 v2 trace stores files as `part-NNNNN-of-00500.csv(.gz)`
+        # under a `task_events/` folder in GCS. Match either naming.
+        csv_files = sorted(
+            list(self.trace_dir.glob("task_events*.csv*"))
+            + list(self.trace_dir.glob("part-*.csv*"))
+        )
         if not csv_files:
             raise FileNotFoundError(
-                f"No task_events CSV files found in {self.trace_dir}"
+                f"No task_events / part-* CSV files found in {self.trace_dir}"
             )
 
         frames = []
@@ -152,7 +157,8 @@ class GoogleV2WorkloadGenerator(WorkloadGenerator):
         self._max_timestep = max(self._jobs_by_timestep.keys()) if self._jobs_by_timestep else 0
         self._loaded = True
 
-    def reset(self) -> None:
+    def reset(self, seed: int | None = None) -> None:
+        # `seed` ignored — trace replay is deterministic.
         if not self._loaded:
             self._load()
         self._pointer = 0

@@ -9,8 +9,12 @@ class WorkloadGenerator(ABC):
     """Abstract base class for workload generators / trace parsers."""
 
     @abstractmethod
-    def reset(self) -> None:
-        """Reset generator state (e.g., rewind trace pointer)."""
+    def reset(self, seed: int | None = None) -> None:
+        """Reset generator state (e.g., rewind trace pointer).
+
+        `seed` is honored only by stochastic generators (synthetic). Trace
+        replayers ignore it — replay is deterministic by definition.
+        """
 
     @abstractmethod
     def get_next_jobs(self, timestep: int) -> list[Job]:
