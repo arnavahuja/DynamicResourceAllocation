@@ -270,9 +270,15 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
         # Train seeds: [seed, seed+1, ..., seed + n_train_seeds - 1]
         # Test seeds:  [seed + TEST_SEED_OFFSET, ..., seed + TEST_SEED_OFFSET + n_test_seeds - 1]
         # The offset (default 1M, see env_config) guarantees no overlap regardless of n_train_seeds.
-        # Real-trace runs override both to a single fixed trajectory since
-        # replay is deterministic.
-        if req.use_real_traces:
+        #
+        # Pure-replay trace families (alibaba / google_v2 / google_v3) ignore
+        # seeds — replay is deterministic, so seed pools are meaningless and
+        # we collapse to a single trajectory. The trace-sampled family is
+        # synthetic Poisson timing on top of trace-derived templates and DOES
+        # honor seeds — treat it like the synthetic generator.
+        PURE_REPLAY_FAMILIES = {"alibaba", "google_v2", "google_v3"}
+        is_pure_replay = req.use_real_traces and req.trace_family in PURE_REPLAY_FAMILIES
+        if is_pure_replay:
             train_seeds: list[int] = []
             test_seeds: list[int] = []
         else:
@@ -346,10 +352,13 @@ def _run_job(run_id: str, req: TrainRequest) -> None:
             pass
 
         # Eval — generalization test on held-out test seeds.
-        # If n_test_seeds > 0: eval on those (the proper ML-style protocol).
-        # Else: legacy fallback to eval_episodes runs on the training seed.
+        # If test_seeds is non-empty: eval on those (proper ML-style protocol).
+        # Else if eval_episodes > 0: legacy fallback on the training seed.
+        # Else: skip — calling evaluate(n_episodes=0) silently returns NaN/0
+        # metrics that look like a real result of zero, masking the misconfig.
         eval_data = None
-        if req.n_test_seeds > 0 or req.eval_episodes > 0:
+        run_eval = bool(test_seeds) or req.eval_episodes > 0
+        if run_eval:
             eval_env = CloudClusterEnv(
                 num_servers=req.n_servers,
                 workload_generator=_build_workload(req),
