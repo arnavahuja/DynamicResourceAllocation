@@ -128,7 +128,7 @@ class SupervisorAgent(BaseAgent):
     ) -> list[dict]:
         from training.trainer import EpisodeStats  # local import avoids cycle
 
-        max_cluster_power = config.P_MAX * env.num_servers
+        max_cluster_power = sum(s.p_max for s in env.servers) or (config.P_MAX * env.num_servers)
         ep_stats: list[dict] = []
 
         log_fh = None

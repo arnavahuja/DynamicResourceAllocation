@@ -16,11 +16,14 @@ class EvalResult:
     std_reward: float
     mean_power: float
     std_power: float
-    sla_violation_rate: float       # violations / jobs_completed
-    mean_jobs_completed: float
-    mean_steps: float
+    mean_active_power: float = 0.0     # cluster active draw (above idle), per episode
+    mean_asleep_servers: float = 0.0   # avg #servers asleep per step
+    sla_violation_rate: float = 0.0    # violations / jobs_completed
+    mean_jobs_completed: float = 0.0
+    mean_steps: float = 0.0
     per_episode_rewards: list[float] = field(default_factory=list)
     per_episode_power: list[float] = field(default_factory=list)
+    per_episode_active_power: list[float] = field(default_factory=list)
     per_episode_sla: list[int] = field(default_factory=list)
     per_episode_utilization: list[list[float]] = field(default_factory=list)
 
@@ -30,6 +33,8 @@ class EvalResult:
             "mean_reward": round(self.mean_reward, 2),
             "std_reward": round(self.std_reward, 2),
             "mean_power": round(self.mean_power, 1),
+            "mean_active_power": round(self.mean_active_power, 1),
+            "mean_asleep_servers": round(self.mean_asleep_servers, 2),
             "sla_violation_rate": round(self.sla_violation_rate, 4),
             "mean_jobs_completed": round(self.mean_jobs_completed, 1),
         }
@@ -50,6 +55,8 @@ def evaluate(
     """
     rewards: list[float] = []
     powers: list[float] = []
+    active_powers: list[float] = []
+    asleep_means: list[float] = []
     slas: list[int] = []
     jobs_done: list[int] = []
     steps: list[int] = []
@@ -66,6 +73,8 @@ def evaluate(
         mask = compute_action_mask(env)
         ep_r = 0.0
         ep_p = 0.0
+        ep_active_p = 0.0
+        ep_asleep_sum = 0
         ep_s = 0
         ep_steps = 0
         cpu_trace: list[float] = []
@@ -77,6 +86,8 @@ def evaluate(
             mask = compute_action_mask(env)
             ep_r += reward
             ep_p += info.get("step_power", 0.0)
+            ep_active_p += info.get("step_active_power", 0.0)
+            ep_asleep_sum += info.get("n_asleep", 0)
             ep_s = info.get("sla_violations", ep_s)
             cpu_trace.append(info.get("mean_cpu_utilization", 0.0))
             ep_steps += 1
@@ -85,6 +96,8 @@ def evaluate(
 
         rewards.append(ep_r)
         powers.append(ep_p)
+        active_powers.append(ep_active_p)
+        asleep_means.append(ep_asleep_sum / max(1, ep_steps))
         slas.append(ep_s)
         jobs_done.append(info.get("jobs_completed", 0))
         steps.append(ep_steps)
@@ -100,11 +113,14 @@ def evaluate(
         std_reward=float(np.std(rewards)),
         mean_power=float(np.mean(powers)),
         std_power=float(np.std(powers)),
+        mean_active_power=float(np.mean(active_powers)) if active_powers else 0.0,
+        mean_asleep_servers=float(np.mean(asleep_means)) if asleep_means else 0.0,
         sla_violation_rate=sla_rate,
         mean_jobs_completed=float(np.mean(jobs_done)),
         mean_steps=float(np.mean(steps)),
         per_episode_rewards=rewards,
         per_episode_power=powers,
+        per_episode_active_power=active_powers,
         per_episode_sla=slas,
         per_episode_utilization=utilizations,
     )

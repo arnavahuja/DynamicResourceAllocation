@@ -11,12 +11,12 @@ const ONLINE_AGENTS = ["dqn", "ppo", "agentic", "round_robin", "sjf", "ffd"];
 // Default base configs — kept minimal, mirror the train pages.
 const DEFAULT_ONLINE = {
   agent: "ppo",
-  n_servers: 50,
+  n_servers: 15,
   episodes: 500,
   episode_length: 1000,
   total_steps: 50000,
-  alpha: 1.0,
-  beta: 50.0,
+  alpha: 5.0,
+  beta: 60.0,
   seed: 0,
   eval_episodes: 0,
   use_real_traces: false,
@@ -27,11 +27,11 @@ const DEFAULT_ONLINE = {
 };
 
 const DEFAULT_OFFLINE = {
-  n_servers: 50,
+  n_servers: 15,
   episode_length: 1000,
   cluster_type: "heterogeneous",
-  alpha: 1.0,
-  beta: 50.0,
+  alpha: 5.0,
+  beta: 60.0,
   seed: 0,
   dataset_path: "data/processed/offline.parquet",
   auto_generate_dataset: true,

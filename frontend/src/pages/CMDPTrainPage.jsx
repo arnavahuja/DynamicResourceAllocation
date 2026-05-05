@@ -8,10 +8,10 @@ import Button from "../components/UI/Button.jsx";
 import Badge from "../components/UI/Badge.jsx";
 
 const FORM_DEFAULTS = {
-  nServers: 10,
+  nServers: 15,
   epLen: 1000,
-  alpha: 1.0,
-  beta: 50.0,
+  alpha: 5.0,
+  beta: 60.0,
   seed: 0,
   clusterType: "homogeneous",
   datasetPath: "data/processed/offline.parquet",
@@ -258,7 +258,7 @@ export default function CMDPTrainPage() {
         <div className="grid cols-3" style={{ marginTop: 16 }}>
           <div>
             <label>α (eval power weight): {alpha.toFixed(2)}</label>
-            <input type="range" min={0} max={5} step={0.05} value={alpha} onChange={(e) => setAlpha(+e.target.value)} />
+            <input type="range" min={0} max={20} step={0.05} value={alpha} onChange={(e) => setAlpha(+e.target.value)} />
           </div>
           <div>
             <label>β (eval SLA weight): {beta.toFixed(1)}</label>

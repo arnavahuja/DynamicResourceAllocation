@@ -24,10 +24,19 @@ ClusterType = str  # "homogeneous" | "heterogeneous"
 # tradeoff — heuristics that ignore server identity (RR) waste energy by
 # routing to big servers; DQN can learn to consolidate small jobs on
 # efficient ones and reserve big servers for jobs that need them.
+# Tier params now also vary p_idle and power_alpha — efficient tier has
+# a lower idle floor AND a flatter u^α curve, power-hungry tier has the
+# opposite. Old factors had p_max=0.3·P_MAX on efficient → below p_idle,
+# which made compute_power decrease with utilization (a real bug). Fixed
+# here: every tier satisfies p_max > p_idle, so consolidating onto the
+# efficient tier is unambiguously better.
 _HETERO_TIERS = [
-    {"p_max_factor": 0.3, "cpu_factor": 0.5, "label": "efficient"},
-    {"p_max_factor": 1.0, "cpu_factor": 1.0, "label": "standard"},
-    {"p_max_factor": 3.0, "cpu_factor": 2.0, "label": "power_hungry"},
+    {"p_idle_factor": 0.7, "p_max_factor": 0.6,
+     "alpha": 1.2, "cpu_factor": 0.7, "label": "efficient"},
+    {"p_idle_factor": 1.0, "p_max_factor": 1.0,
+     "alpha": 1.4, "cpu_factor": 1.0, "label": "standard"},
+    {"p_idle_factor": 1.5, "p_max_factor": 1.6,
+     "alpha": 1.6, "cpu_factor": 1.4, "label": "power_hungry"},
 ]
 
 
@@ -52,9 +61,9 @@ def build_fleet(
                     server_id=i,
                     cpu_capacity=config.SERVER_CPU_CAPACITY * tier["cpu_factor"],
                     mem_capacity=config.SERVER_MEM_CAPACITY * tier["cpu_factor"],
-                    p_idle=config.P_IDLE,
+                    p_idle=config.P_IDLE * tier["p_idle_factor"],
                     p_max=config.P_MAX * tier["p_max_factor"],
-                    power_alpha=config.POWER_ALPHA,
+                    power_alpha=tier["alpha"],
                 )
             )
         return servers

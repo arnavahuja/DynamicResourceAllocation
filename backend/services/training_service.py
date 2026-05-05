@@ -524,7 +524,8 @@ def _ensure_offline_dataset(
     if w.sum() <= 0:
         w = np.array([1.0, 1.0, 1.0])
     weights = w / w.sum()
-    max_cluster_power = env_config.P_MAX * n_servers
+    # Use the actual fleet sum (heterogeneous tiers vary in p_max).
+    max_cluster_power = sum(s.p_max for s in env.servers) or (env_config.P_MAX * n_servers)
 
     rows = []
     for _ in range(episodes):

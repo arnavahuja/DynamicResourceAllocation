@@ -142,6 +142,8 @@ class ExperimentSummary(BaseModel):
     mean_reward_last10: float | None = None
     mean_reward_eval: float | None = None
     mean_power: float | None = None
+    mean_active_power: float | None = None
+    mean_asleep_servers: float | None = None
     sla_violation_rate: float | None = None
     optimal_reward: float | None = None
     gap_pct: float | None = None

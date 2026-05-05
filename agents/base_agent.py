@@ -38,20 +38,26 @@ class BaseAgent(ABC):
 
 
 def compute_action_mask(env: CloudClusterEnv) -> np.ndarray:
-    """Return bool mask of shape (K * N + 1,) for the joint (job, server)
-    action space.
+    """Return bool mask of shape (K*N + 1 + N,) for the joint action space.
 
-    Layout: mask[k * N + n] = True if queue[k] exists AND server[n] can fit it.
-            mask[K * N]    = "wait" — only legal when no dispatch is possible
-                             (queue empty OR no fitting (job, server) pair).
-                             Without this restriction DQN converges to a wait-
-                             too-much local optimum, since waiting has zero
-                             immediate cost and queue-pressure penalty is
-                             heavily discounted.
+    Layout:
+      mask[k*N + n]        : assign queue[k] to server[n] — server must be
+                             awake-and-available AND able to fit the job.
+      mask[K*N]            : "wait" — gated to "no dispatch is legal" so the
+                             agent doesn't fall into a wait-everything local
+                             optimum (queue-pressure penalty is heavily γ-
+                             discounted, so without this gate waiting looks
+                             free).
+      mask[K*N + 1 + n]    : toggle sleep on server n. Legal whenever the
+                             server is in a state that admits a transition —
+                             awake-and-idle (→ sleep) or asleep (→ wake).
+                             Sleep/wake are NOT gated on "no dispatch
+                             possible"; agent may sleep underused servers
+                             even with assignable jobs in the queue.
     """
     N = env.num_servers
     K = env.job_queue_size
-    mask = np.zeros(N * K + 1, dtype=bool)
+    mask = np.zeros(N * K + 1 + N, dtype=bool)
     for k in range(min(K, len(env.job_queue))):
         job = env.job_queue[k]
         for n, server in enumerate(env.servers):
@@ -60,4 +66,8 @@ def compute_action_mask(env: CloudClusterEnv) -> np.ndarray:
     # Wait is only legal when no dispatch is.
     if not mask[: N * K].any():
         mask[N * K] = True
+    # Sleep / wake toggles.
+    for n, server in enumerate(env.servers):
+        if server.can_request_sleep or server.can_request_wake:
+            mask[N * K + 1 + n] = True
     return mask

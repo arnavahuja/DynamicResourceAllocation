@@ -37,6 +37,7 @@ class CloudClusterEnv(gym.Env):
         job_queue_size: int = config.JOB_QUEUE_SIZE,
         episode_length: int = config.EPISODE_LENGTH,
         invalid_action_penalty: float = config.INVALID_ACTION_PENALTY,
+        toggle_penalty: float = config.TOGGLE_PENALTY,
         cluster_type: str = "homogeneous",
         cluster_seed: int = 0,
         render_mode: str | None = None,
@@ -53,28 +54,32 @@ class CloudClusterEnv(gym.Env):
         self.job_queue_size = job_queue_size
         self.episode_length = episode_length
         self.invalid_action_penalty = invalid_action_penalty
+        self.toggle_penalty = toggle_penalty
         self.cluster_type = cluster_type
         self.cluster_seed = cluster_seed
         self.render_mode = render_mode
 
-        # Observation per server: [cpu_util, mem_util, p_max_norm, cpu_cap_norm]
-        # — p_max_norm and cpu_cap_norm expose server identity (tier) so the
-        # agent can prefer efficient servers in heterogeneous clusters. In
-        # homogeneous clusters both are constant and the agent learns to
-        # ignore them.
-        obs_dim = 4 * num_servers + 4 * job_queue_size
+        # Observation per server: [cpu_util, mem_util, p_max_norm, cpu_cap_norm,
+        # is_asleep, wakeup_norm]
+        # — first four expose tier identity; last two expose lifecycle state
+        # so the agent can decide to wake/sleep servers.
+        obs_dim = 6 * num_servers + 4 * job_queue_size
         self.observation_space = spaces.Box(
             low=0.0, high=np.inf, shape=(obs_dim,), dtype=np.float32
         )
 
-        # Action: Discrete(K * N + 1).
-        #   a in [0, K*N): k = a // N (queue position), n = a % N (server idx)
-        #     → assign queue[k] to server[n]
-        #   a == K * N → "wait", dispatch nothing this step (no-op)
-        # This lets the agent choose WHICH job (not just where), and gives it
-        # the option of skipping a step when no good (job, server) pair exists.
-        self.n_actions = num_servers * job_queue_size + 1
+        # Action: Discrete(K * N + 1 + N).
+        #   a in [0, K*N)             : assign queue[k = a // N] to server[n = a % N]
+        #   a == K * N                : "wait" — no dispatch this step
+        #   a in [K*N+1, K*N+1+N)     : toggle sleep/wake on server (a - K*N - 1)
+        #     • awake & idle  → request_sleep
+        #     • asleep        → request_wake (begins WAKEUP_DELAY warm-up)
+        # The wait action is gated to "no dispatch is legal"; sleep/wake are
+        # always legal whenever physically valid (idle awake / asleep), so the
+        # agent can sleep underused servers even when other dispatches are open.
+        self.n_actions = num_servers * job_queue_size + 1 + num_servers
         self.wait_action = num_servers * job_queue_size
+        self.sleep_action_base = num_servers * job_queue_size + 1
         self.action_space = spaces.Discrete(self.n_actions)
 
         # Internal state
@@ -122,9 +127,26 @@ class CloudClusterEnv(gym.Env):
         sla_violations_this_step = 0
 
         # --- Decode action and dispatch ---
-        # action == wait_action → no-op for this step.
-        # else: k = action // N (queue position), n = action % N (server idx).
-        if action != self.wait_action:
+        if action == self.wait_action:
+            pass  # no-op
+        elif action >= self.sleep_action_base:
+            # Toggle sleep on server (action - sleep_action_base).
+            n = action - self.sleep_action_base
+            server = self.servers[n]
+            if server.can_request_sleep:
+                server.request_sleep()
+                reward -= self.toggle_penalty
+            elif server.can_request_wake:
+                server.request_wake()
+                # Wake is free: we want the agent to recover capacity
+                # immediately when load arrives. Asymmetric cost (sleep paid,
+                # wake free) still prevents flicker because back-to-back
+                # sleep→wake→sleep pays the sleep penalty twice.
+            else:
+                # Toggle requested but server has running jobs and is awake,
+                # or is mid-wake. Treat as invalid action.
+                reward += self.invalid_action_penalty
+        else:
             k = action // self.num_servers
             n = action % self.num_servers
             if k < len(self.job_queue):
@@ -193,24 +215,37 @@ class CloudClusterEnv(gym.Env):
         self.job_queue.extend(new_jobs)
 
         # --- Compute reward ---
-        # Per-server power so heterogeneous clusters reflect tier differences.
-        cluster_power = sum(
-            compute_power(s.cpu_utilization, s.p_idle, s.p_max, s.power_alpha)
-            for s in self.servers
-        )
+        # Server.power_draw() handles the three lifecycle states (asleep ⇒
+        # standby fraction of p_idle, waking ⇒ full p_idle, awake ⇒ full curve).
+        cluster_power = sum(s.power_draw() for s in self.servers)
         self.total_power += cluster_power
 
-        # Fix 1: reward uses ACTIVE power (above idle), not total cluster power.
-        # The idle floor is a constant the agent cannot influence — including it
-        # in the reward just adds a per-step bias that drowns out the gradient
-        # from the part the agent CAN control (which server to assign).
-        #   active_power      = Σ (p_max_i - p_idle_i) · u_i^α
-        #   active_ceiling    = Σ (p_max_i - p_idle_i)
-        # Normalized active power is in [0, 1] regardless of fleet composition.
+        # Active power = power above each server's *own* idle floor for awake
+        # servers. Sleeping servers contribute 0 to active power AND drop the
+        # cluster_power floor, so the agent now has a real lever: putting a
+        # server to sleep saves ~0.95 · p_idle every step it stays asleep.
         active_ceiling = sum(s.p_max - s.p_idle for s in self.servers)
-        idle_total = sum(s.p_idle for s in self.servers)
-        active_power = max(0.0, cluster_power - idle_total)
+        active_power = sum(
+            max(0.0, s.power_draw() - s.p_idle)
+            for s in self.servers
+            if not s.is_asleep
+        )
         normalized_active = active_power / active_ceiling if active_ceiling > 0 else 0.0
+
+        # Idle-floor pressure: only penalize servers that are awake AND
+        # underutilized (i.e. could plausibly be put to sleep). Weighting by
+        # (1 − utilization) means a fully-loaded server contributes 0 to this
+        # term, while a zero-load awake server pays its full p_idle. Without
+        # this, the agent gets the same penalty for a busy server as for an
+        # idle one and learns to over-sleep — driving SLA violations up while
+        # only marginally reducing power.
+        sleepable_idle = sum(
+            s.p_idle * (1.0 - max(0.0, min(1.0, s.cpu_utilization)))
+            for s in self.servers
+            if not s.is_asleep
+        )
+        full_idle_total = sum(s.p_idle for s in self.servers) or 1.0
+        normalized_idle = sleepable_idle / full_idle_total  # ∈ [0, 1]
 
         # SLA term: discrete violations divided by N_SERVERS (boundary signal)
         # plus continuous queue_pressure (within-deadline gradient).
@@ -218,8 +253,13 @@ class CloudClusterEnv(gym.Env):
             sla_violations_this_step / max(1, self.num_servers)
             + queue_pressure / max(1, self.num_servers)
         )
+        # Power term combines active draw (variable) and sleepable-idle
+        # footprint (the lever sleep gives us). Weighted 80/20 so the active
+        # signal stays louder than the sleep bonus — otherwise the agent
+        # over-sleeps even productive servers.
+        power_term = 0.8 * normalized_active + 0.2 * normalized_idle
         reward += -(
-            self.reward_alpha * normalized_active
+            self.reward_alpha * power_term
             + self.reward_beta * sla_signal
         )
 
@@ -230,19 +270,34 @@ class CloudClusterEnv(gym.Env):
         obs = self._get_obs()
         info = self._get_info()
         info["step_power"] = cluster_power
+        info["step_active_power"] = active_power
         info["step_sla_violations"] = sla_violations_this_step
+        info["n_asleep"] = sum(1 for s in self.servers if s.is_asleep)
+        info["n_waking"] = sum(
+            1 for s in self.servers
+            if (not s.is_asleep) and s.wakeup_remaining > 0
+        )
 
         return obs, reward, terminated, truncated, info
 
     def _get_obs(self) -> np.ndarray:
-        # Server features: [cpu_util, mem_util, p_max_norm, cpu_cap_norm].
+        # Server features: [cpu_util, mem_util, p_max_norm, cpu_cap_norm,
+        #                   is_asleep, wakeup_norm].
         # _norm values are relative to the env defaults so the canonical
-        # "standard tier" = 1.0.
+        # "standard tier" = 1.0. wakeup_norm = wakeup_remaining / WAKEUP_DELAY
+        # so the agent sees how soon a waking server becomes available.
         server_features = []
+        wakeup_denom = max(1, config.SERVER_WAKEUP_DELAY)
         for s in self.servers:
             p_max_norm = s.p_max / config.P_MAX if config.P_MAX > 0 else 1.0
             cap_norm = s.cpu_capacity / config.SERVER_CPU_CAPACITY if config.SERVER_CPU_CAPACITY > 0 else 1.0
-            server_features.extend([s.cpu_utilization, s.mem_utilization, p_max_norm, cap_norm])
+            is_asleep_f = 1.0 if s.is_asleep else 0.0
+            wakeup_norm = s.wakeup_remaining / wakeup_denom
+            server_features.extend([
+                s.cpu_utilization, s.mem_utilization,
+                p_max_norm, cap_norm,
+                is_asleep_f, wakeup_norm,
+            ])
 
         # Job queue features: [cpu_req, mem_req, duration, wait_time] per visible job
         queue_features = []

@@ -54,6 +54,8 @@ def _row_to_summary(row: dict) -> dict:
         "mean_reward_last10": last10,
         "mean_reward_eval": eval_d.get("mean_reward"),
         "mean_power": eval_d.get("mean_power"),
+        "mean_active_power": eval_d.get("mean_active_power"),
+        "mean_asleep_servers": eval_d.get("mean_asleep_servers"),
         "sla_violation_rate": eval_d.get("sla_violation_rate"),
         "optimal_reward": optimal,
         "gap_pct": gap_pct,

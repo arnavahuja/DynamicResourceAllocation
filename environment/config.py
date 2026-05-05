@@ -35,7 +35,7 @@ def _b(key: str, default: bool) -> bool:
 
 
 # ── Cluster ─────────────────────────────────────────────────────
-NUM_SERVERS: int = _i("N_SERVERS", 10)
+NUM_SERVERS: int = _i("N_SERVERS", 15)
 SERVER_CPU_CAPACITY: float = _f("SERVER_CPU_CAPACITY", 1.0)
 SERVER_MEM_CAPACITY: float = _f("SERVER_MEM_CAPACITY", 1.0)
 
@@ -45,13 +45,25 @@ P_MAX: float = _f("P_MAX", 300.0)
 POWER_ALPHA: float = _f("POWER_ALPHA", 1.4)
 
 # ── SLA / reward ────────────────────────────────────────────────
-SLA_LATENCY_DEADLINE: int = _i("SLA_LATENCY_DEADLINE", 10)
+SLA_LATENCY_DEADLINE: int = _i("SLA_LATENCY_DEADLINE", 30)
 SLA_MULTIPLIER: float = _f("SLA_MULTIPLIER", 1.6)
-REWARD_ALPHA: float = _f("ALPHA", 1.0)
-REWARD_BETA: float = _f("BETA", 50.0)
+# α (power) raised and β (SLA) lowered so power becomes a real signal,
+# not just a tiebreaker. Sleep-aware env can now actually move power.
+REWARD_ALPHA: float = _f("ALPHA", 5.0)
+REWARD_BETA: float = _f("BETA", 60.0)
+
+# ── Server sleep model ──────────────────────────────────────────
+# Asleep server draws SLEEP_STANDBY_FACTOR · p_idle (e.g. 5 %).
+# Wake-up takes WAKEUP_DELAY steps during which the server is unavailable
+# for assignment but draws full p_idle (warming up).
+SLEEP_STANDBY_FACTOR: float = _f("SLEEP_STANDBY_FACTOR", 0.05)
+SERVER_WAKEUP_DELAY: int = _i("SERVER_WAKEUP_DELAY", 1)
 
 # ── Workload generation ─────────────────────────────────────────
-SYNTHETIC_ARRIVAL_RATE: float = _f("SYNTHETIC_ARRIVAL_RATE", 0.8)
+# Lower default arrival rate creates the headroom needed for sleep
+# decisions to actually save power. Bursty / high-rate experiments can
+# override via the .env or the request body.
+SYNTHETIC_ARRIVAL_RATE: float = _f("SYNTHETIC_ARRIVAL_RATE", 0.5)
 REAL_TRACE_MAX_JOBS: int = _i("REAL_TRACE_MAX_JOBS", 500)
 TRACE_SAMPLED_MAX_JOBS: int = _i("TRACE_SAMPLED_MAX_JOBS", 5000)
 
@@ -63,6 +75,10 @@ TEST_SEED_OFFSET: int = _i("TEST_SEED_OFFSET", 1_000_000)
 JOB_QUEUE_SIZE: int = _i("MAX_QUEUE_SIZE", 5)
 EPISODE_LENGTH: int = _i("EPISODE_LENGTH", 1000)
 INVALID_ACTION_PENALTY: float = _f("INVALID_ACTION_PENALTY", -10.0)
+# Per-toggle cost on sleep/wake actions. Without this, PPO learns a noisy
+# bang-bang policy (flicker servers in & out of sleep) that pays the wakeup
+# unavailability cost without ever realizing the standby savings.
+TOGGLE_PENALTY: float = _f("TOGGLE_PENALTY", 0.2)
 
 # ── Training ────────────────────────────────────────────────────
 GAMMA: float = _f("GAMMA", 0.99)
