@@ -64,6 +64,17 @@ def init_db() -> None:
                 FOREIGN KEY (run_id) REFERENCES experiments(run_id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_episodes_run ON episodes(run_id);
+            CREATE TABLE IF NOT EXISTS cmdp_iterations (
+                run_id TEXT NOT NULL,
+                iteration INTEGER NOT NULL,
+                loss_r REAL NOT NULL,
+                loss_c REAL NOT NULL,
+                lambda_val REAL NOT NULL,
+                violation REAL,
+                PRIMARY KEY (run_id, iteration),
+                FOREIGN KEY (run_id) REFERENCES experiments(run_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_cmdp_iter_run ON cmdp_iterations(run_id);
             """
         )
 
@@ -145,4 +156,28 @@ def get_episodes(run_id: str) -> list[dict]:
 def delete_experiment(run_id: str) -> None:
     with get_conn() as conn:
         conn.execute("DELETE FROM episodes WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM cmdp_iterations WHERE run_id = ?", (run_id,))
         conn.execute("DELETE FROM experiments WHERE run_id = ?", (run_id,))
+
+
+def insert_cmdp_iteration(
+    run_id: str, iteration: int, loss_r: float, loss_c: float,
+    lambda_val: float, violation: float | None,
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO cmdp_iterations "
+            "(run_id, iteration, loss_r, loss_c, lambda_val, violation) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (run_id, iteration, loss_r, loss_c, lambda_val, violation),
+        )
+
+
+def get_cmdp_iterations(run_id: str) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT iteration, loss_r, loss_c, lambda_val, violation "
+            "FROM cmdp_iterations WHERE run_id = ? ORDER BY iteration",
+            (run_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]

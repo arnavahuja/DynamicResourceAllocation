@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useQuery, useQueries } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "../lib/api.js";
 import Card from "../components/UI/Card.jsx";
@@ -14,12 +14,37 @@ import MetricBars from "../components/Charts/MetricBars.jsx";
 export default function ResultsPage() {
   const [params] = useSearchParams();
   const initial = params.get("run");
+  const qc = useQueryClient();
 
-  const { data: experiments = [] } = useQuery({
+  const deleteMutation = useMutation({
+    mutationFn: async (ids) => {
+      await Promise.all(ids.map((id) => api.deleteExperiment(id)));
+      return ids;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+      setSelected([]);
+    },
+  });
+
+  const handleDelete = () => {
+    if (selected.length === 0) return;
+    const msg = `Delete ${selected.length} run${selected.length === 1 ? "" : "s"} from the database (and their checkpoints + logs)? This cannot be undone.`;
+    if (window.confirm(msg)) deleteMutation.mutate(selected);
+  };
+
+  const { data: allExperiments = [] } = useQuery({
     queryKey: ["experiments"],
     queryFn: api.listExperiments,
     refetchInterval: 30000,
   });
+  // CMDP runs have their own dedicated page (/cmdp/results) — they don't
+  // fit the per-episode reward/power/SLA charts here.
+  // Sweep runs likewise live on /sweep/results so this listing stays
+  // focused on individually launched, comparable experiments.
+  const experiments = allExperiments.filter(
+    (e) => e.agent !== "cmdp" && !e.sweep_id
+  );
 
   const [selected, setSelected] = useState(() => (initial ? [initial] : []));
   const toggle = (id) =>
@@ -95,9 +120,20 @@ export default function ResultsPage() {
         title="Experiments"
         sub="Click rows to overlay them on the comparison charts below"
         action={
-          <Button variant="ghost" onClick={downloadCsv} disabled={details.length === 0}>
-            Export CSV
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button
+              variant="danger"
+              onClick={handleDelete}
+              disabled={selected.length === 0 || deleteMutation.isPending}
+            >
+              {deleteMutation.isPending
+                ? "Deleting…"
+                : `Delete ${selected.length || ""} selected`}
+            </Button>
+            <Button variant="ghost" onClick={downloadCsv} disabled={details.length === 0}>
+              Export CSV
+            </Button>
+          </div>
         }
       >
         {experiments.length === 0 ? (

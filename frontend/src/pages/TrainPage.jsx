@@ -32,7 +32,7 @@ const FORM_DEFAULTS = {
   seed: 0,
   evalEps: 10,
   useTraces: false,
-  traceFamily: "alibaba",
+  traceFamily: "google_v2_sampled",
   clusterType: "homogeneous",
   nTrainSeeds: 1,
   nTestSeeds: 0,
@@ -83,11 +83,14 @@ export default function TrainPage() {
     });
   }, [agent, nServers, episodes, epLen, alpha, beta, seed, evalEps, useTraces, traceFamily, clusterType, nTrainSeeds, nTestSeeds]);
 
-  const { data: experiments = [] } = useQuery({
+  const { data: allExperiments = [] } = useQuery({
     queryKey: ["experiments"],
     queryFn: api.listExperiments,
     refetchInterval: 5000,
   });
+  // Sweep-triggered runs live on /sweep/results so they don't clutter
+  // the train dashboard's recent-runs table.
+  const experiments = allExperiments.filter((e) => !e.sweep_id);
 
   const launch = useMutation({
     mutationFn: api.startTraining,
@@ -212,9 +215,7 @@ export default function TrainPage() {
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 0 }}>
               Trace:
               <select value={traceFamily} onChange={(e) => setTraceFamily(e.target.value)}>
-                <option value="alibaba">Alibaba 2018</option>
-                <option value="google_v2">Google v2 (2011)</option>
-                <option value="google_v3">Google v3 (2019)</option>
+                <option value="google_v2">Google v2 (2011) — pure replay</option>
                 <option value="google_v2_sampled">Google v2 (sampled + Poisson)</option>
               </select>
             </label>

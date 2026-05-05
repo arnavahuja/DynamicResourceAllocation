@@ -17,11 +17,21 @@ export const api = {
   configDefaults: () => jsonFetch("/config/defaults"),
   startTraining: (body) =>
     jsonFetch("/train", { method: "POST", body: JSON.stringify(body) }),
+  startOfflineTraining: (body) =>
+    jsonFetch("/offline/train", { method: "POST", body: JSON.stringify(body) }),
+  offlineDatasetExists: (path) =>
+    jsonFetch(`/offline/dataset_exists?path=${encodeURIComponent(path)}`),
+  startSweep: (body) =>
+    jsonFetch("/sweep", { method: "POST", body: JSON.stringify(body) }),
+  sweepable: () => jsonFetch("/sweep/sweepable"),
+  listSweeps: () => jsonFetch("/sweep"),
+  getSweep: (sweepId) => jsonFetch(`/sweep/${sweepId}`),
   trainStatus: (runId) => jsonFetch(`/train/${runId}/status`),
   cancelTraining: (runId) =>
     jsonFetch(`/train/${runId}`, { method: "DELETE" }),
   listExperiments: () => jsonFetch("/experiments"),
   getExperiment: (runId) => jsonFetch(`/experiments/${runId}/results`),
+  getCmdpIterations: (runId) => jsonFetch(`/experiments/${runId}/cmdp_iterations`),
   deleteExperiment: (runId) =>
     jsonFetch(`/experiments/${runId}`, { method: "DELETE" }),
   simulate: (body) =>

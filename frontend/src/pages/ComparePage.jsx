@@ -19,15 +19,30 @@ export default function ComparePage() {
 
   const completed = experiments.filter((e) => e.status === "completed");
 
-  // Group by agent type so the user can quickly toggle whole categories.
-  const agents = useMemo(
-    () => Array.from(new Set(completed.map((e) => e.agent))),
-    [completed]
-  );
-  const [enabledAgents, setEnabledAgents] = useState(null);
-  const active = enabledAgents ?? agents;
+  // Selection state: list of run_ids the user has explicitly added. null
+  // means "show everything" (initial state). Once the user touches the
+  // selector, we switch to explicit mode.
+  const [selectedRuns, setSelectedRuns] = useState(null);
+  const [pendingRun, setPendingRun] = useState("");
+  const active = selectedRuns ?? completed.map((e) => e.run_id);
 
-  const filtered = completed.filter((e) => active.includes(e.agent));
+  const filtered = completed.filter((e) => active.includes(e.run_id));
+
+  const addRun = (id) => {
+    if (!id) return;
+    setSelectedRuns((prev) => {
+      const base = prev ?? [];
+      return base.includes(id) ? base : [...base, id];
+    });
+    setPendingRun("");
+  };
+  const removeRun = (id) => {
+    setSelectedRuns((prev) => (prev ?? completed.map((e) => e.run_id)).filter((x) => x !== id));
+  };
+  const clearSelection = () => setSelectedRuns([]);
+  const selectAll = () => setSelectedRuns(completed.map((e) => e.run_id));
+
+  const availableForAdd = completed.filter((e) => !active.includes(e.run_id));
 
   // Sort by reward descending for nicer-looking bars (best on the left).
   const sorted = [...filtered].sort(
@@ -81,47 +96,85 @@ export default function ComparePage() {
     <div>
       <Card
         title="Cross-run comparison"
-        sub="Aggregate metrics across every completed run. Toggle agents to filter."
+        sub="Pick the specific runs you want to compare. Click × on a chip to remove a run; use the dropdown to add another."
       >
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {agents.map((a) => {
-            const on = active.includes(a);
-            return (
-              <button
-                key={a}
-                className="btn ghost"
-                onClick={() =>
-                  setEnabledAgents(
-                    on ? active.filter((x) => x !== a) : [...active, a]
-                  )
-                }
-                style={{
-                  borderColor: on ? colorForAgent(a) : "var(--border)",
-                  color: on ? colorForAgent(a) : "var(--text-muted)",
-                  fontWeight: on ? 600 : 400,
-                  padding: "6px 12px",
-                  fontSize: 12,
-                }}
-              >
-                <span
-                  style={{
-                    display: "inline-block",
-                    width: 8,
-                    height: 8,
-                    borderRadius: 4,
-                    background: on ? colorForAgent(a) : "transparent",
-                    border: `1px solid ${colorForAgent(a)}`,
-                    marginRight: 6,
-                    verticalAlign: "middle",
-                  }}
-                />
-                {a}
-              </button>
-            );
-          })}
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <select
+            value={pendingRun}
+            onChange={(e) => addRun(e.target.value)}
+            style={{ minWidth: 320, fontFamily: "IBM Plex Mono", fontSize: 12 }}
+          >
+            <option value="">— add a run to compare —</option>
+            {availableForAdd.map((e) => (
+              <option key={e.run_id} value={e.run_id}>
+                {e.agent} · {e.run_id}
+              </option>
+            ))}
+          </select>
+          <button className="btn ghost" onClick={selectAll} style={{ fontSize: 12 }}>
+            Select all
+          </button>
+          <button className="btn ghost" onClick={clearSelection} style={{ fontSize: 12 }}>
+            Clear
+          </button>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {active.length} of {completed.length} selected
+          </span>
         </div>
+
+        {active.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            {active.map((id) => {
+              const e = completed.find((x) => x.run_id === id);
+              if (!e) return null;
+              const c = colorForAgent(e.agent);
+              return (
+                <span
+                  key={id}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 8px 4px 10px",
+                    border: `1px solid ${c}`,
+                    borderRadius: 999,
+                    fontSize: 11,
+                    fontFamily: "IBM Plex Mono",
+                    color: c,
+                    background: `${c}10`,
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>{e.agent}</span>
+                  <span style={{ opacity: 0.7 }}>·</span>
+                  <span>{e.run_id.slice(-8)}</span>
+                  <button
+                    onClick={() => removeRun(id)}
+                    title="Remove"
+                    style={{
+                      marginLeft: 4,
+                      border: "none",
+                      background: "transparent",
+                      color: c,
+                      cursor: "pointer",
+                      fontSize: 14,
+                      lineHeight: 1,
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
         {rows.length === 0 && (
-          <div className="empty">No completed runs match the selected agents.</div>
+          <div className="empty">
+            {completed.length === 0
+              ? "No completed runs yet."
+              : "No runs selected — pick one from the dropdown above."}
+          </div>
         )}
       </Card>
 

@@ -28,12 +28,14 @@ export default function MonitorPage() {
   });
 
   const [episodes, setEpisodes] = useState([]);
+  const [iterations, setIterations] = useState([]);  // CMDP FQI events
   const [lastEvent, setLastEvent] = useState(null);
   const wsRef = useRef(null);
 
   useEffect(() => {
     if (!runId) return;
     setEpisodes([]);
+    setIterations([]);
     setLastEvent(null);
 
     let alive = true;
@@ -47,6 +49,8 @@ export default function MonitorPage() {
         setLastEvent(msg);
         if (msg.event === "episode") {
           setEpisodes((prev) => [...prev, msg]);
+        } else if (msg.event === "iteration") {
+          setIterations((prev) => [...prev, msg]);
         }
       };
       ws.onclose = () => {
@@ -101,6 +105,43 @@ export default function MonitorPage() {
   const exp = experiments.find((x) => x.run_id === runId);
   const nServers = exp?.n_servers ?? 10;
   const optimalReward = exp?.optimal_reward ?? null;
+  const isCmdp = exp?.agent === "cmdp";
+
+  // CMDP-specific live series: pulled from "iteration" events.
+  const lossRSeries = useMemo(
+    () => [{
+      name: "loss_r",
+      color: "#1E3A8A",
+      data: iterations.map((p) => ({ episode: p.iteration, value: p.loss_r })),
+    }],
+    [iterations]
+  );
+  const lossCSeries = useMemo(
+    () => [{
+      name: "loss_c",
+      color: "#10B981",
+      data: iterations.map((p) => ({ episode: p.iteration, value: p.loss_c })),
+    }],
+    [iterations]
+  );
+  const lambdaSeries = useMemo(
+    () => [{
+      name: "λ",
+      color: "#F59E0B",
+      data: iterations.map((p) => ({ episode: p.iteration, value: p.lambda })),
+    }],
+    [iterations]
+  );
+  const violationSeries = useMemo(
+    () => [{
+      name: "constraint violation",
+      color: "#EF4444",
+      data: iterations
+        .filter((p) => p.constraint_violation != null)
+        .map((p) => ({ episode: p.iteration, value: p.constraint_violation })),
+    }],
+    [iterations]
+  );
   const placeholderUtils = useMemo(() => {
     const last = episodes[episodes.length - 1];
     if (!last) return new Array(nServers).fill(0);
@@ -138,6 +179,16 @@ export default function MonitorPage() {
       >
         {!runId ? (
           <div className="empty">Pick an active run from the dropdown above.</div>
+        ) : isCmdp ? (
+          <div className="grid cols-3">
+            <Stat label="iteration" value={status ? `${status.current_episode}/${status.total_episodes}` : "—"} />
+            <Stat
+              label="latest λ"
+              value={iterations.length ? iterations[iterations.length - 1].lambda.toFixed(3) : "—"}
+              hint="Lagrangian dual variable"
+            />
+            <Stat label="ETA" value={status?.eta_seconds ? `${Math.round(status.eta_seconds)}s` : "—"} />
+          </div>
         ) : (
           <div className="grid cols-3">
             <Stat label="episode" value={status ? `${status.current_episode}/${status.total_episodes}` : "—"} />
@@ -151,7 +202,37 @@ export default function MonitorPage() {
         )}
       </Card>
 
-      {runId && (
+      {runId && isCmdp && (
+        <>
+          <div className="grid cols-2">
+            <Card title="FQI loss — Q_r (reward critic)" sub="Smooth-L1 Bellman loss vs FQI iteration. Should decay.">
+              <MetricLine series={lossRSeries} yLabel="loss_r" />
+            </Card>
+            <Card title="FQI loss — Q_c (cost / SLA critic)" sub="Bellman + CQL loss for the constraint critic.">
+              <MetricLine series={lossCSeries} yLabel="loss_c" />
+            </Card>
+          </div>
+
+          <div className="grid cols-2">
+            <Card title="Lagrangian λ" sub="Rises when policy violates the SLA budget; falls when there's slack.">
+              <MetricLine series={lambdaSeries} yLabel="λ" />
+            </Card>
+            <Card title="Constraint violation" sub="E[Q_c(s, π(s))] − ε_sla. Should approach 0 as λ converges.">
+              <MetricLine series={violationSeries} yLabel="E[Q_c]−ε" referenceY={0} referenceLabel="0" />
+            </Card>
+          </div>
+
+          {lastEvent && lastEvent.event && (
+            <Card title="Last event" sub="Raw WebSocket payload">
+              <pre className="mono" style={{ fontSize: 12, overflow: "auto", margin: 0 }}>
+                {JSON.stringify(lastEvent, null, 2)}
+              </pre>
+            </Card>
+          )}
+        </>
+      )}
+
+      {runId && !isCmdp && (
         <>
           <Card
             title="Reward (per episode)"
