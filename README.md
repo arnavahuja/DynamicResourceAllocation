@@ -163,7 +163,7 @@ mount, so retuning the env doesn't require a frontend edit.
   floor — dataset feasibility floor + CQL inflation of `Q_c` + dual
   saturation compound.
 
-See `Final_Report.tex` for the full analysis.
+See `Final_Report` for the full analysis.
 
 ## License
 
