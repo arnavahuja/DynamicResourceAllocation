@@ -1,0 +1,97 @@
+# Cloud Build pipeline triggered on push to main.
+# Builds backend + frontend images, pushes them to Artifact Registry,
+# and deploys both to Cloud Run.
+#
+# Substitution variables (set in the trigger):
+#   _REGION       — e.g. us-central1
+#   _BUCKET_NAME  — GCS bucket for model checkpoints
+#   _N_SERVERS    — default cluster size baked into backend env
+
+substitutions:
+  _REGION: us-central1
+  _BUCKET_NAME: cloud-rl-artifacts
+  _N_SERVERS: "10"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # ── Backend ──────────────────────────────────────────────────
+  - id: build-backend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.backend
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/backend:$SHORT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/backend:latest
+      - .
+
+  - id: push-backend
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/backend"]
+    waitFor: [build-backend]
+
+  # ── Frontend ─────────────────────────────────────────────────
+  - id: build-frontend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile.frontend
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/frontend:$SHORT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/frontend:latest
+      - .
+
+  - id: push-frontend
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/frontend"]
+    waitFor: [build-frontend]
+
+  # ── Deploy ───────────────────────────────────────────────────
+  - id: deploy-backend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - cloud-rl-backend
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/backend:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --min-instances=1
+      - --max-instances=4
+      - --cpu=2
+      - --memory=4Gi
+      - --timeout=3600
+      - --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_BUCKET_NAME=${_BUCKET_NAME},N_SERVERS=${_N_SERVERS}
+    waitFor: [push-backend]
+
+  - id: deploy-frontend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - cloud-rl-frontend
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/frontend:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --min-instances=0
+      - --max-instances=4
+      - --cpu=1
+      - --memory=256Mi
+    waitFor: [push-frontend]
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/backend:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/backend:latest
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/frontend:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/cloud-rl/frontend:latest

@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.DS_Store
+
+.env
+*.db
+checkpoints/
+data/raw/
+data/processed/
+wandb/
+runs/
+logs/
+
+# venv
+.venv/
+venv/
+env_venv/
+
+# node
+node_modules/
+frontend/dist/
+
+# gcp
+gcp/service-account-key.json

@@ -1,0 +1,31 @@
+# Local-dev orchestration. Not used when running `uvicorn` + `npm run dev`
+# directly — left here for the eventual `docker compose up` workflow.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////app/data/experiments.db
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
